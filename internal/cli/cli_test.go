@@ -275,11 +275,12 @@ func TestCheckpointRequiresArg(t *testing.T) {
 	}
 }
 
-func TestLiaisonCheckMessagesRequiresArg(t *testing.T) {
+func TestLiaisonCheckMessagesNoArg(t *testing.T) {
 	setupProject(t)
+	// check-messages without args defaults to checking liaison messages.
 	_, err := executeCmd(t, "liaison", "check-messages")
-	if err == nil {
-		t.Error("expected error when no agent ID provided")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
