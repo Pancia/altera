@@ -1,0 +1,205 @@
+// Package config handles loading and saving Altera configuration from the
+// .alt/ directory. It provides path resolution (walking up from cwd to find
+// .alt/), CRUD operations on the root config and per-rig configs, and atomic
+// file writes to prevent corruption.
+package config
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// DirName is the name of the Altera project directory.
+const DirName = ".alt"
+
+// Constraints holds resource limits for the orchestration system.
+type Constraints struct {
+	BudgetCeiling float64 `json:"budget_ceiling"`
+	MaxWorkers    int     `json:"max_workers"`
+	MaxQueueDepth int     `json:"max_queue_depth"`
+}
+
+// RigConfig holds per-rig settings stored in .alt/rigs/{name}/config.json.
+type RigConfig struct {
+	RepoPath      string `json:"repo_path"`
+	DefaultBranch string `json:"default_branch"`
+	TestCommand   string `json:"test_command"`
+}
+
+// Config is the root configuration stored in .alt/config.json.
+type Config struct {
+	Rigs        map[string]RigConfig `json:"rigs"`
+	Constraints Constraints          `json:"constraints"`
+}
+
+// NewConfig returns a Config with sensible defaults.
+func NewConfig() Config {
+	return Config{
+		Rigs: make(map[string]RigConfig),
+		Constraints: Constraints{
+			BudgetCeiling: 100.0,
+			MaxWorkers:    4,
+			MaxQueueDepth: 10,
+		},
+	}
+}
+
+// FindRoot walks up from startDir looking for a DirName directory.
+// Returns the path to the DirName directory (e.g. /path/to/.alt), or an error
+// if none is found.
+func FindRoot(startDir string) (string, error) {
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving absolute path: %w", err)
+	}
+	for {
+		candidate := filepath.Join(dir, DirName)
+		info, err := os.Stat(candidate)
+		if err == nil && info.IsDir() {
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no %s directory found (searched up from %s)", DirName, startDir)
+		}
+		dir = parent
+	}
+}
+
+// EnsureDir creates the .alt/ directory and standard subdirectories under
+// parentDir if they don't already exist.
+func EnsureDir(parentDir string) (string, error) {
+	altDir := filepath.Join(parentDir, DirName)
+	dirs := []string{
+		altDir,
+		filepath.Join(altDir, "rigs"),
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return "", fmt.Errorf("creating directory %s: %w", d, err)
+		}
+	}
+	return altDir, nil
+}
+
+// Load reads and parses the root config.json from the given .alt/ directory.
+func Load(altDir string) (Config, error) {
+	path := filepath.Join(altDir, "config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return NewConfig(), nil
+		}
+		return Config{}, fmt.Errorf("reading config: %w", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parsing config: %w", err)
+	}
+	if cfg.Rigs == nil {
+		cfg.Rigs = make(map[string]RigConfig)
+	}
+	return cfg, nil
+}
+
+// Save writes the root config.json to the given .alt/ directory using an
+// atomic temp+rename pattern.
+func Save(altDir string, cfg Config) error {
+	path := filepath.Join(altDir, "config.json")
+	return atomicWriteJSON(path, cfg)
+}
+
+// LoadRig reads the per-rig config from .alt/rigs/{name}/config.json.
+func LoadRig(altDir, name string) (RigConfig, error) {
+	path := rigConfigPath(altDir, name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return RigConfig{}, fmt.Errorf("rig %q not found", name)
+		}
+		return RigConfig{}, fmt.Errorf("reading rig config: %w", err)
+	}
+	var rc RigConfig
+	if err := json.Unmarshal(data, &rc); err != nil {
+		return RigConfig{}, fmt.Errorf("parsing rig config: %w", err)
+	}
+	return rc, nil
+}
+
+// SaveRig writes a per-rig config to .alt/rigs/{name}/config.json using an
+// atomic temp+rename pattern. Creates the rig directory if needed.
+func SaveRig(altDir, name string, rc RigConfig) error {
+	rigDir := filepath.Join(altDir, "rigs", name)
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		return fmt.Errorf("creating rig directory: %w", err)
+	}
+	return atomicWriteJSON(rigConfigPath(altDir, name), rc)
+}
+
+// DeleteRig removes a rig's config directory from .alt/rigs/{name}/.
+func DeleteRig(altDir, name string) error {
+	rigDir := filepath.Join(altDir, "rigs", name)
+	if err := os.RemoveAll(rigDir); err != nil {
+		return fmt.Errorf("deleting rig %q: %w", name, err)
+	}
+	return nil
+}
+
+// ListRigs returns the names of all rigs that have config directories.
+func ListRigs(altDir string) ([]string, error) {
+	rigsDir := filepath.Join(altDir, "rigs")
+	entries, err := os.ReadDir(rigsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing rigs: %w", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
+// rigConfigPath returns the path to a rig's config.json.
+func rigConfigPath(altDir, name string) string {
+	return filepath.Join(altDir, "rigs", name, "config.json")
+}
+
+// atomicWriteJSON marshals v as indented JSON and writes it atomically using
+// a temp file + rename in the same directory.
+func atomicWriteJSON(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling JSON: %w", err)
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+	return nil
+}
