@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"github.com/anthropics/altera/internal/daemon"
 	"github.com/spf13/cobra"
 )
 
@@ -23,12 +24,16 @@ var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := resolveAltDir()
+		root, err := projectRoot()
 		if err != nil {
 			return fmt.Errorf("not an altera project: %w", err)
 		}
-		fmt.Println("Daemon start not yet implemented.")
-		return nil
+		d, err := daemon.New(root)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Daemon starting...")
+		return d.Run()
 	},
 }
 
@@ -36,11 +41,14 @@ var daemonStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := resolveAltDir()
+		altDir, err := resolveAltDir()
 		if err != nil {
 			return fmt.Errorf("not an altera project: %w", err)
 		}
-		fmt.Println("Daemon stop not yet implemented.")
+		if err := daemon.SendStop(altDir); err != nil {
+			return err
+		}
+		fmt.Println("Daemon stop signal sent.")
 		return nil
 	},
 }
@@ -49,11 +57,16 @@ var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := resolveAltDir()
+		altDir, err := resolveAltDir()
 		if err != nil {
 			return fmt.Errorf("not an altera project: %w", err)
 		}
-		fmt.Println("Daemon status not yet implemented.")
+		st := daemon.ReadStatus(altDir)
+		if st.Running {
+			fmt.Printf("Daemon is running (PID %d)\n", st.PID)
+		} else {
+			fmt.Println("Daemon is not running.")
+		}
 		return nil
 	},
 }

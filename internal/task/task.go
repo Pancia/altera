@@ -255,6 +255,13 @@ func (s *Store) FindReady() ([]*Task, error) {
 	return ready, nil
 }
 
+// ForceWrite writes a task to disk without validating status transitions.
+// This is intended for privileged operations like the daemon reclaiming
+// tasks from dead agents.
+func (s *Store) ForceWrite(t *Task) error {
+	return s.writeTask(t)
+}
+
 // writeTask atomically writes a task to disk (temp file + rename).
 func (s *Store) writeTask(t *Task) error {
 	data, err := json.MarshalIndent(t, "", "  ")
