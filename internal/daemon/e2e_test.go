@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthropics/altera/internal/agent"
 	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
+	"github.com/anthropics/altera/internal/merge"
 	"github.com/anthropics/altera/internal/message"
 	"github.com/anthropics/altera/internal/task"
 )
@@ -908,6 +910,446 @@ func TestE2E_FullTick(t *testing.T) {
 	}
 	if !hasMergeStarted {
 		t.Error("expected MergeStarted event in tick output")
+	}
+}
+
+// --- Test: Merge Conflict Spawns Resolver ---
+//
+// When a merge conflict occurs and a rig is configured, the daemon should
+// attempt to spawn a resolver agent. Since tmux isn't available in tests,
+// this verifies the fallback (message sent to worker) when SpawnResolver fails.
+
+func TestE2E_MergeConflict_AttemptsResolverSpawn(t *testing.T) {
+	root := setupE2EProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	origGitLog := gitLogTimestamp
+	defer func() { gitLogTimestamp = origGitLog }()
+	gitLogTimestamp = func(worktree string) (string, error) {
+		return fmt.Sprintf("%d", time.Now().Unix()), nil
+	}
+
+	// Set up a rig config so the resolver manager can load it.
+	rigDir := filepath.Join(d.altDir, "rigs", "test-rig")
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatalf("mkdir rig dir: %v", err)
+	}
+	rigCfg := config.RigConfig{
+		RepoPath:      root,
+		DefaultBranch: "main",
+	}
+	rigData, _ := json.MarshalIndent(rigCfg, "", "  ")
+	if err := os.WriteFile(filepath.Join(rigDir, "config.json"), rigData, 0o644); err != nil {
+		t.Fatalf("write rig config: %v", err)
+	}
+
+	// Create two tasks that will conflict.
+	tk1 := &task.Task{
+		ID: "t-res01", Title: "Worker 1", Status: task.StatusOpen,
+		Rig: "test-rig", Description: "Change main.go to version A",
+	}
+	if err := d.tasks.Create(tk1); err != nil {
+		t.Fatalf("create task 1: %v", err)
+	}
+	simulateWorker(t, d, "t-res01", "worker/w-res01", "w-res01", map[string]string{
+		"main.go": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"version A\")\n}\n",
+	})
+
+	tk2 := &task.Task{
+		ID: "t-res02", Title: "Worker 2", Status: task.StatusOpen,
+		Rig: "test-rig", Description: "Change main.go to version B",
+	}
+	if err := d.tasks.Create(tk2); err != nil {
+		t.Fatalf("create task 2: %v", err)
+	}
+	simulateWorker(t, d, "t-res02", "worker/w-res02", "w-res02", map[string]string{
+		"main.go": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"version B\")\n}\n",
+	})
+
+	// Both signal completion.
+	for _, w := range []struct{ agent, task string }{
+		{"w-res01", "t-res01"},
+		{"w-res02", "t-res02"},
+	} {
+		d.messages.Create(message.TypeTaskDone, w.agent, "daemon", w.task, map[string]any{"result": "done"})
+	}
+
+	var tickEvents []events.Event
+	d.processMessages(&tickEvents)
+
+	// Process merge queue — first succeeds, second conflicts.
+	tickEvents = nil
+	d.processMergeQueue(&tickEvents)
+
+	successEvents := eventsOfType(tickEvents, events.MergeSuccess)
+	conflictEvents := eventsOfType(tickEvents, events.MergeConflict)
+
+	if len(successEvents) != 1 {
+		t.Errorf("expected 1 MergeSuccess event, got %d", len(successEvents))
+	}
+	if len(conflictEvents) != 1 {
+		t.Errorf("expected 1 MergeConflict event, got %d", len(conflictEvents))
+	}
+
+	// Clean up any spawned resolver agents (tmux sessions + worktrees).
+	t.Cleanup(func() {
+		resolvers, _ := d.resolverMgr.ListResolvers()
+		for _, r := range resolvers {
+			d.resolverMgr.CleanupResolver(r)
+		}
+	})
+
+	// The merge queue item should be removed regardless of whether
+	// SpawnResolver succeeded (resolver spawned) or failed (fallback message).
+	queueDir := filepath.Join(d.altDir, "merge-queue")
+	entries, _ := os.ReadDir(queueDir)
+	queueCount := 0
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".json" {
+			queueCount++
+		}
+	}
+	if queueCount != 0 {
+		t.Errorf("merge queue items = %d, want 0 (conflict item should be removed)", queueCount)
+	}
+}
+
+// --- Test: Conflict Extract in Merge Queue ---
+//
+// Verifies that processMergeQueue properly extracts conflict markers from
+// conflicting files before passing them to the resolver.
+
+func TestE2E_MergeConflict_ExtractsConflictInfo(t *testing.T) {
+	root := setupE2EProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	origGitLog := gitLogTimestamp
+	defer func() { gitLogTimestamp = origGitLog }()
+	gitLogTimestamp = func(worktree string) (string, error) {
+		return fmt.Sprintf("%d", time.Now().Unix()), nil
+	}
+
+	// Create conflicting branches.
+	tk1 := &task.Task{ID: "t-ext01", Title: "Modify main", Status: task.StatusOpen}
+	if err := d.tasks.Create(tk1); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	simulateWorker(t, d, "t-ext01", "worker/w-ext01", "w-ext01", map[string]string{
+		"main.go": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"alpha\")\n}\n",
+	})
+
+	tk2 := &task.Task{ID: "t-ext02", Title: "Also modify main", Status: task.StatusOpen}
+	if err := d.tasks.Create(tk2); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	simulateWorker(t, d, "t-ext02", "worker/w-ext02", "w-ext02", map[string]string{
+		"main.go": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"beta\")\n}\n",
+	})
+
+	// Signal both done and process messages.
+	d.messages.Create(message.TypeTaskDone, "w-ext01", "daemon", "t-ext01", map[string]any{"result": "done"})
+	d.messages.Create(message.TypeTaskDone, "w-ext02", "daemon", "t-ext02", map[string]any{"result": "done"})
+
+	var tickEvents []events.Event
+	d.processMessages(&tickEvents)
+
+	// Merge first branch successfully.
+	tickEvents = nil
+	d.processMergeQueue(&tickEvents)
+
+	// Verify the conflict event has conflict file paths.
+	conflictEvents := eventsOfType(tickEvents, events.MergeConflict)
+	if len(conflictEvents) != 1 {
+		t.Fatalf("expected 1 MergeConflict event, got %d", len(conflictEvents))
+	}
+
+	conflictData, ok := conflictEvents[0].Data["conflicts"]
+	if !ok {
+		t.Fatal("MergeConflict event missing 'conflicts' data")
+	}
+
+	conflicts, ok := conflictData.([]string)
+	if !ok {
+		t.Fatalf("conflicts data type = %T, want []string", conflictData)
+	}
+	if len(conflicts) == 0 {
+		t.Fatal("expected at least one conflict path")
+	}
+	if conflicts[0] != "main.go" {
+		t.Errorf("conflict path = %q, want %q", conflicts[0], "main.go")
+	}
+}
+
+// --- Test: CheckResolvers with real git resolution ---
+//
+// Creates a resolver agent record with a worktree that has resolved conflicts.
+// Verifies that checkResolvers detects the resolution and re-queues the task.
+
+func TestE2E_CheckResolvers_DetectsResolution(t *testing.T) {
+	root := setupE2EProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a task that the resolver is working on.
+	tk := &task.Task{
+		ID:         "t-resolve01",
+		Title:      "Task being resolved",
+		Status:     task.StatusDone,
+		Branch:     "worker/w-resolve01",
+		AssignedTo: "w-resolve01",
+	}
+	if err := d.tasks.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Set up a resolver worktree (a real git repo with clean state).
+	resolverWorktree := t.TempDir()
+	gitCmd(t, resolverWorktree, "init")
+	gitCmd(t, resolverWorktree, "config", "user.name", "resolver")
+	gitCmd(t, resolverWorktree, "config", "user.email", "resolver@test.local")
+	writeTestFile(t, resolverWorktree, "main.go", "package main\n\nfunc main() {}\n")
+	gitCmd(t, resolverWorktree, "add", "-A")
+	gitCmd(t, resolverWorktree, "commit", "-m", "resolved conflicts")
+
+	// Write conflict-context.json so checkResolvers can load it.
+	ctxData, _ := json.MarshalIndent(map[string]any{
+		"task_id": "t-resolve01",
+		"branch":  "worker/w-resolve01",
+		"conflicts": []map[string]any{
+			{"path": "main.go", "markers": []map[string]any{}},
+		},
+	}, "", "  ")
+	if err := os.WriteFile(filepath.Join(resolverWorktree, "conflict-context.json"), ctxData, 0o644); err != nil {
+		t.Fatalf("write conflict-context: %v", err)
+	}
+	// Stage and commit the context file too (so working tree is clean).
+	gitCmd(t, resolverWorktree, "add", "conflict-context.json")
+	gitCmd(t, resolverWorktree, "commit", "-m", "add conflict context")
+
+	// Create the resolver agent record.
+	resolverAgent := &agent.Agent{
+		ID:          "resolver-01",
+		Role:        agent.RoleResolver,
+		Status:      agent.StatusActive,
+		CurrentTask: "t-resolve01",
+		Worktree:    resolverWorktree,
+		PID:         os.Getpid(),
+		Heartbeat:   time.Now(),
+		StartedAt:   time.Now(),
+	}
+	if err := d.agents.Create(resolverAgent); err != nil {
+		t.Fatalf("create resolver agent: %v", err)
+	}
+
+	// Run checkResolvers.
+	var tickEvents []events.Event
+	d.checkResolvers(&tickEvents)
+
+	// The resolver should be cleaned up (marked dead).
+	updated, err := d.agents.Get("resolver-01")
+	if err != nil {
+		t.Fatalf("get resolver agent: %v", err)
+	}
+	if updated.Status != agent.StatusDead {
+		t.Errorf("resolver status = %q, want %q", updated.Status, agent.StatusDead)
+	}
+
+	// Task should be re-queued in the merge queue.
+	queueDir := filepath.Join(d.altDir, "merge-queue")
+	entries, _ := os.ReadDir(queueDir)
+	queueCount := 0
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".json" {
+			queueCount++
+		}
+	}
+	if queueCount != 1 {
+		t.Fatalf("merge queue items = %d, want 1 (re-queued after resolution)", queueCount)
+	}
+
+	// Read the queue item to verify it has the right task.
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(queueDir, e.Name()))
+		if err != nil {
+			t.Fatalf("read queue item: %v", err)
+		}
+		var item MergeItem
+		if err := json.Unmarshal(data, &item); err != nil {
+			t.Fatalf("parse queue item: %v", err)
+		}
+		if item.TaskID != "t-resolve01" {
+			t.Errorf("queue item task_id = %q, want %q", item.TaskID, "t-resolve01")
+		}
+	}
+}
+
+// --- Test: CheckResolvers skips unresolved ---
+//
+// Verifies that checkResolvers does NOT clean up a resolver that still has
+// conflict markers.
+
+func TestE2E_CheckResolvers_SkipsUnresolved(t *testing.T) {
+	root := setupE2EProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Set up a resolver worktree with conflict markers still present.
+	resolverWorktree := t.TempDir()
+	gitCmd(t, resolverWorktree, "init")
+	gitCmd(t, resolverWorktree, "config", "user.name", "resolver")
+	gitCmd(t, resolverWorktree, "config", "user.email", "resolver@test.local")
+
+	// Write a file with conflict markers.
+	conflictContent := strings.Join([]string{
+		"package main",
+		"",
+		"<<<<<<< HEAD",
+		"func main() { println(\"ours\") }",
+		"=======",
+		"func main() { println(\"theirs\") }",
+		">>>>>>> worker/branch",
+	}, "\n") + "\n"
+	writeTestFile(t, resolverWorktree, "main.go", conflictContent)
+	gitCmd(t, resolverWorktree, "add", "-A")
+	gitCmd(t, resolverWorktree, "commit", "-m", "initial with conflicts")
+
+	// Write conflict-context.json.
+	ctxData, _ := json.MarshalIndent(map[string]any{
+		"task_id": "t-unresolved",
+		"branch":  "worker/w-unresolved",
+		"conflicts": []map[string]any{
+			{"path": "main.go", "markers": []map[string]any{
+				{"OursStart": 3, "OursEnd": 5, "TheirsStart": 5, "TheirsEnd": 7},
+			}},
+		},
+	}, "", "  ")
+	os.WriteFile(filepath.Join(resolverWorktree, "conflict-context.json"), ctxData, 0o644)
+	gitCmd(t, resolverWorktree, "add", "conflict-context.json")
+	gitCmd(t, resolverWorktree, "commit", "-m", "add context")
+
+	// Create the resolver agent.
+	resolverAgent := &agent.Agent{
+		ID:          "resolver-02",
+		Role:        agent.RoleResolver,
+		Status:      agent.StatusActive,
+		CurrentTask: "t-unresolved",
+		Worktree:    resolverWorktree,
+		PID:         os.Getpid(),
+		Heartbeat:   time.Now(),
+		StartedAt:   time.Now(),
+	}
+	if err := d.agents.Create(resolverAgent); err != nil {
+		t.Fatalf("create resolver agent: %v", err)
+	}
+
+	// Run checkResolvers.
+	var tickEvents []events.Event
+	d.checkResolvers(&tickEvents)
+
+	// Resolver should still be active (not cleaned up).
+	updated, err := d.agents.Get("resolver-02")
+	if err != nil {
+		t.Fatalf("get resolver agent: %v", err)
+	}
+	if updated.Status != agent.StatusActive {
+		t.Errorf("resolver status = %q, want %q (should stay active)", updated.Status, agent.StatusActive)
+	}
+
+	// Merge queue should be empty (no re-queue).
+	queueDir := filepath.Join(d.altDir, "merge-queue")
+	entries, _ := os.ReadDir(queueDir)
+	queueCount := 0
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".json" {
+			queueCount++
+		}
+	}
+	if queueCount != 0 {
+		t.Errorf("merge queue items = %d, want 0 (unresolved)", queueCount)
+	}
+}
+
+// --- Test: BuildConflictContext extracts from real conflicting files ---
+
+func TestE2E_BuildConflictContext_WithConflictMarkers(t *testing.T) {
+	root := setupE2EProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a task.
+	tk := &task.Task{
+		ID:          "t-bctx01",
+		Title:       "Test context build",
+		Description: "Testing conflict context extraction",
+		Status:      task.StatusDone,
+		Rig:         "my-rig",
+		Branch:      "worker/w-bctx01",
+		AssignedTo:  "w-bctx01",
+	}
+	if err := d.tasks.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Write a file with conflict markers in the root dir.
+	conflictContent := strings.Join([]string{
+		"package main",
+		"",
+		"<<<<<<< HEAD",
+		"var x = 1",
+		"=======",
+		"var x = 2",
+		">>>>>>> worker/w-bctx01",
+		"",
+		"<<<<<<< HEAD",
+		"var y = 10",
+		"=======",
+		"var y = 20",
+		">>>>>>> worker/w-bctx01",
+	}, "\n") + "\n"
+	writeTestFile(t, root, "conflict.go", conflictContent)
+
+	item := MergeItem{
+		TaskID:  "t-bctx01",
+		Branch:  "worker/w-bctx01",
+		AgentID: "w-bctx01",
+	}
+
+	// Use ExtractConflicts on the file.
+	info := merge.ExtractConflicts(filepath.Join(root, "conflict.go"))
+	info.Path = "conflict.go"
+	conflicts := []merge.ConflictInfo{info}
+
+	ctx := d.buildConflictContext(item, conflicts)
+
+	if ctx.TaskID != "t-bctx01" {
+		t.Errorf("TaskID = %q, want %q", ctx.TaskID, "t-bctx01")
+	}
+	if ctx.RigName != "my-rig" {
+		t.Errorf("RigName = %q, want %q", ctx.RigName, "my-rig")
+	}
+	if ctx.TaskDescription != "Testing conflict context extraction" {
+		t.Errorf("TaskDescription = %q", ctx.TaskDescription)
+	}
+	if len(ctx.Conflicts) != 1 {
+		t.Fatalf("expected 1 conflict, got %d", len(ctx.Conflicts))
+	}
+	if len(ctx.Conflicts[0].Markers) != 2 {
+		t.Errorf("expected 2 conflict markers, got %d", len(ctx.Conflicts[0].Markers))
 	}
 }
 

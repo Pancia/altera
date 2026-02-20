@@ -13,6 +13,7 @@ import (
 	"github.com/anthropics/altera/internal/agent"
 	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
+	"github.com/anthropics/altera/internal/merge"
 	"github.com/anthropics/altera/internal/message"
 	"github.com/anthropics/altera/internal/task"
 )
@@ -1176,6 +1177,187 @@ func TestAtomicWrite_ConcurrentSafety(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".tmp-") {
 			t.Errorf("leftover temp file: %s", e.Name())
 		}
+	}
+}
+
+// --- Resolver wiring ---
+
+func TestBuildConflictContext(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a task with rig and description.
+	tk := &task.Task{
+		ID:          "t-ctx01",
+		Title:       "Test task",
+		Description: "Implement feature X",
+		Status:      task.StatusDone,
+		Rig:         "test-rig",
+		Branch:      "worker/w-ctx01",
+		AssignedTo:  "w-ctx01",
+	}
+	if err := d.tasks.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	item := MergeItem{
+		TaskID:  "t-ctx01",
+		Branch:  "worker/w-ctx01",
+		AgentID: "w-ctx01",
+	}
+
+	conflicts := []merge.ConflictInfo{
+		{Path: "main.go", Markers: []merge.ConflictMarker{{OursStart: 5, OursEnd: 8, TheirsStart: 8, TheirsEnd: 11}}},
+	}
+
+	ctx := d.buildConflictContext(item, conflicts)
+
+	if ctx.TaskID != "t-ctx01" {
+		t.Errorf("TaskID = %q, want %q", ctx.TaskID, "t-ctx01")
+	}
+	if ctx.Branch != "worker/w-ctx01" {
+		t.Errorf("Branch = %q, want %q", ctx.Branch, "worker/w-ctx01")
+	}
+	if ctx.RigName != "test-rig" {
+		t.Errorf("RigName = %q, want %q", ctx.RigName, "test-rig")
+	}
+	if ctx.TaskDescription != "Implement feature X" {
+		t.Errorf("TaskDescription = %q, want %q", ctx.TaskDescription, "Implement feature X")
+	}
+	if len(ctx.Conflicts) != 1 || ctx.Conflicts[0].Path != "main.go" {
+		t.Errorf("Conflicts = %v, want 1 conflict for main.go", ctx.Conflicts)
+	}
+}
+
+func TestBuildConflictContext_MissingTask(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	item := MergeItem{
+		TaskID:  "t-missing",
+		Branch:  "worker/w-missing",
+		AgentID: "w-missing",
+	}
+
+	ctx := d.buildConflictContext(item, nil)
+
+	// Should still have item fields, but empty rig/description.
+	if ctx.TaskID != "t-missing" {
+		t.Errorf("TaskID = %q, want %q", ctx.TaskID, "t-missing")
+	}
+	if ctx.RigName != "" {
+		t.Errorf("RigName = %q, want empty", ctx.RigName)
+	}
+	if ctx.TaskDescription != "" {
+		t.Errorf("TaskDescription = %q, want empty", ctx.TaskDescription)
+	}
+}
+
+func TestLoadConflictContext(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a fake worktree directory with a conflict-context.json.
+	worktreeDir := t.TempDir()
+	ctxData := `{
+  "task_id": "t-load01",
+  "branch": "worker/w-load01",
+  "conflicts": [
+    {"path": "file1.go", "markers": [{"OursStart": 1, "OursEnd": 5, "TheirsStart": 5, "TheirsEnd": 9}]},
+    {"path": "file2.go", "markers": []}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(worktreeDir, "conflict-context.json"), []byte(ctxData), 0o644); err != nil {
+		t.Fatalf("write context: %v", err)
+	}
+
+	a := &agent.Agent{
+		ID:       "resolver-01",
+		Worktree: worktreeDir,
+	}
+
+	conflicts, err := d.loadConflictContext(a)
+	if err != nil {
+		t.Fatalf("loadConflictContext: %v", err)
+	}
+	if len(conflicts) != 2 {
+		t.Fatalf("conflicts = %d, want 2", len(conflicts))
+	}
+	if conflicts[0].Path != "file1.go" {
+		t.Errorf("conflict[0].Path = %q, want %q", conflicts[0].Path, "file1.go")
+	}
+}
+
+func TestLoadConflictContext_MissingFile(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	a := &agent.Agent{
+		ID:       "resolver-01",
+		Worktree: t.TempDir(), // Empty dir, no conflict-context.json.
+	}
+
+	_, err = d.loadConflictContext(a)
+	if err == nil {
+		t.Fatal("expected error for missing conflict-context.json")
+	}
+}
+
+func TestCheckResolvers_NoResolvers(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Should not panic or error with no resolvers.
+	var tickEvents []events.Event
+	d.checkResolvers(&tickEvents)
+
+	if len(tickEvents) != 0 {
+		t.Errorf("tick events = %d, want 0", len(tickEvents))
+	}
+}
+
+func TestCheckResolvers_SkipsDeadResolvers(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a dead resolver agent.
+	a := &agent.Agent{
+		ID:          "resolver-01",
+		Role:        agent.RoleResolver,
+		Status:      agent.StatusDead,
+		CurrentTask: "t-dead",
+		Worktree:    t.TempDir(),
+		Heartbeat:   time.Now(),
+		StartedAt:   time.Now(),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.checkResolvers(&tickEvents)
+
+	// Dead resolver should be skipped, no events.
+	if len(tickEvents) != 0 {
+		t.Errorf("tick events = %d, want 0", len(tickEvents))
 	}
 }
 

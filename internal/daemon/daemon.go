@@ -24,7 +24,9 @@ import (
 	"github.com/anthropics/altera/internal/constraints"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/git"
+	"github.com/anthropics/altera/internal/merge"
 	"github.com/anthropics/altera/internal/message"
+	"github.com/anthropics/altera/internal/resolver"
 	"github.com/anthropics/altera/internal/task"
 	"github.com/anthropics/altera/internal/tmux"
 )
@@ -42,13 +44,14 @@ type Daemon struct {
 	altDir  string // path to .alt/ directory
 	rootDir string // project root (parent of .alt/)
 
-	cfg       config.Config
-	agents    *agent.Store
-	tasks     *task.Store
-	messages  *message.Store
-	events    *events.Writer
-	evReader  *events.Reader
-	checker   *constraints.Checker
+	cfg         config.Config
+	agents      *agent.Store
+	tasks       *task.Store
+	messages    *message.Store
+	events      *events.Writer
+	evReader    *events.Reader
+	checker     *constraints.Checker
+	resolverMgr *resolver.Manager
 
 	pidFile  string   // path to .alt/daemon.pid
 	lockFile *os.File // held flock on pid file
@@ -101,21 +104,24 @@ func New(rootDir string) (*Daemon, error) {
 
 	checker := constraints.NewChecker(cfg.Constraints, agentStore, evReader, mergeQueueDir)
 
+	resolverMgr := resolver.NewManager(rootDir, agentStore, evWriter)
+
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil)).With("component", "daemon")
 
 	return &Daemon{
-		altDir:   altDir,
-		rootDir:  rootDir,
-		cfg:      cfg,
-		agents:   agentStore,
-		tasks:    taskStore,
-		messages: msgStore,
-		events:   evWriter,
-		evReader: evReader,
-		checker:  checker,
-		pidFile:  filepath.Join(altDir, "daemon.pid"),
-		logger:   logger,
-		shutdown: make(chan struct{}),
+		altDir:      altDir,
+		rootDir:     rootDir,
+		cfg:         cfg,
+		agents:      agentStore,
+		tasks:       taskStore,
+		messages:    msgStore,
+		events:      evWriter,
+		evReader:    evReader,
+		checker:     checker,
+		resolverMgr: resolverMgr,
+		pidFile:     filepath.Join(altDir, "daemon.pid"),
+		logger:      logger,
+		shutdown:    make(chan struct{}),
 	}, nil
 }
 
@@ -288,6 +294,7 @@ func (d *Daemon) tick() {
 	d.assignTasks(&tickEvents)
 	d.processMessages(&tickEvents)
 	d.processMergeQueue(&tickEvents)
+	d.checkResolvers(&tickEvents)
 	d.checkConstraints(&tickEvents)
 	d.emitEvents(tickEvents)
 
@@ -728,6 +735,16 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 		if !result.Clean {
 			d.logger.Info("merge: conflict", "branch", item.Branch, "conflicts", result.Conflicts)
 			git.AbortMerge(d.rootDir)
+
+			// Extract structured conflict info for each file.
+			conflicts := make([]merge.ConflictInfo, 0, len(result.Conflicts))
+			for _, path := range result.Conflicts {
+				fullPath := filepath.Join(d.rootDir, path)
+				info := merge.ExtractConflicts(fullPath)
+				info.Path = path
+				conflicts = append(conflicts, info)
+			}
+
 			*tickEvents = append(*tickEvents, events.Event{
 				Timestamp: time.Now(),
 				Type:      events.MergeConflict,
@@ -736,18 +753,27 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 				Data:      map[string]any{"conflicts": result.Conflicts},
 			})
 
-			// Send merge result back to the agent.
-			d.messages.Create(
-				message.TypeMergeResult,
-				"daemon",
-				item.AgentID,
-				item.TaskID,
-				map[string]any{
-					"success":   false,
-					"conflicts": result.Conflicts,
-				},
-			)
-			// Remove failed item from queue.
+			// Build conflict context and spawn a resolver agent.
+			ctx := d.buildConflictContext(item, conflicts)
+			resolverAgent, err := d.resolverMgr.SpawnResolver(ctx)
+			if err != nil {
+				d.logger.Error("merge: spawn resolver", "task", item.TaskID, "error", err)
+				// Fall back to notifying the original agent.
+				d.messages.Create(
+					message.TypeMergeResult,
+					"daemon",
+					item.AgentID,
+					item.TaskID,
+					map[string]any{
+						"success":   false,
+						"conflicts": result.Conflicts,
+					},
+				)
+			} else {
+				d.logger.Info("merge: spawned resolver", "resolver", resolverAgent.ID, "task", item.TaskID)
+			}
+
+			// Remove conflicting item from queue.
 			os.Remove(itemPath)
 			continue
 		}
@@ -772,6 +798,97 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 			map[string]any{"success": true},
 		)
 	}
+}
+
+// buildConflictContext creates a resolver.ConflictContext from a merge item
+// and the extracted conflict info.
+func (d *Daemon) buildConflictContext(item MergeItem, conflicts []merge.ConflictInfo) resolver.ConflictContext {
+	ctx := resolver.ConflictContext{
+		TaskID:    item.TaskID,
+		Branch:    item.Branch,
+		Conflicts: conflicts,
+	}
+
+	// Look up the task for rig name and description.
+	t, err := d.tasks.Get(item.TaskID)
+	if err == nil {
+		ctx.RigName = t.Rig
+		ctx.TaskDescription = t.Description
+	}
+
+	return ctx
+}
+
+// --- Step 5b: CheckResolvers ---
+
+// checkResolvers checks active resolver agents for completed resolutions.
+// When a resolver has finished (no conflict markers, clean tree), it is
+// cleaned up and the task is re-queued for merge.
+func (d *Daemon) checkResolvers(tickEvents *[]events.Event) {
+	resolvers, err := d.resolverMgr.ListResolvers()
+	if err != nil {
+		d.logger.Error("resolvers: list", "error", err)
+		return
+	}
+
+	for _, r := range resolvers {
+		if r.Status != agent.StatusActive {
+			continue
+		}
+
+		// Load the conflict context to know which files to check.
+		conflicts, err := d.loadConflictContext(r)
+		if err != nil {
+			d.logger.Error("resolvers: load conflict context", "resolver", r.ID, "error", err)
+			continue
+		}
+
+		resolved, err := resolver.DetectResolution(r, conflicts)
+		if err != nil {
+			d.logger.Error("resolvers: detect resolution", "resolver", r.ID, "error", err)
+			continue
+		}
+
+		if !resolved {
+			continue
+		}
+
+		d.logger.Info("resolvers: resolution detected", "resolver", r.ID, "task", r.CurrentTask)
+
+		// Clean up the resolver agent.
+		if err := d.resolverMgr.CleanupResolver(r); err != nil {
+			d.logger.Error("resolvers: cleanup", "resolver", r.ID, "error", err)
+			continue
+		}
+
+		// Re-queue the task for merge.
+		t, err := d.tasks.Get(r.CurrentTask)
+		if err != nil {
+			d.logger.Error("resolvers: get task for re-queue", "task", r.CurrentTask, "error", err)
+			continue
+		}
+		if err := d.addToMergeQueue(t); err != nil {
+			d.logger.Error("resolvers: re-queue task", "task", r.CurrentTask, "error", err)
+			continue
+		}
+
+		d.logger.Info("resolvers: re-queued task for merge", "task", r.CurrentTask)
+	}
+}
+
+// loadConflictContext reads the conflict-context.json from a resolver's
+// worktree and returns the conflict info needed for resolution detection.
+func (d *Daemon) loadConflictContext(r *agent.Agent) ([]merge.ConflictInfo, error) {
+	ctxPath := filepath.Join(r.Worktree, "conflict-context.json")
+	data, err := os.ReadFile(ctxPath)
+	if err != nil {
+		return nil, fmt.Errorf("read conflict-context.json: %w", err)
+	}
+	var ctx resolver.ConflictContext
+	if err := json.Unmarshal(data, &ctx); err != nil {
+		return nil, fmt.Errorf("parse conflict-context.json: %w", err)
+	}
+	return ctx.Conflicts, nil
 }
 
 // addToMergeQueue writes a merge item to the queue directory.
