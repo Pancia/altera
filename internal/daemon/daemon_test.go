@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -191,11 +193,12 @@ func TestCheckAgentLiveness_WithTaskReclaim(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// Create a task that's assigned.
+	// Create a task that's assigned with a branch.
 	tk := &task.Task{
 		Title:      "test task",
 		Status:     task.StatusAssigned,
 		AssignedTo: "test-dead-2",
+		Branch:     "worker/test-dead-2",
 	}
 	if err := d.tasks.Create(tk); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -228,6 +231,9 @@ func TestCheckAgentLiveness_WithTaskReclaim(t *testing.T) {
 	}
 	if updatedTask.AssignedTo != "" {
 		t.Errorf("task assigned_to = %q, want empty", updatedTask.AssignedTo)
+	}
+	if updatedTask.Branch != "" {
+		t.Errorf("task branch = %q, want empty", updatedTask.Branch)
 	}
 }
 
@@ -758,6 +764,456 @@ func TestTick(t *testing.T) {
 
 	// tick should not panic with an empty project.
 	d.tick()
+}
+
+// --- Reconciliation tests ---
+
+func TestReconcileAgents_StaleMarkedDead(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a stale active agent (dead process).
+	a := &agent.Agent{
+		ID:        "stale-agent",
+		Role:      agent.RoleWorker,
+		Status:    agent.StatusActive,
+		PID:       9999999,
+		Heartbeat: time.Now().Add(-5 * time.Minute),
+		StartedAt: time.Now().Add(-10 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	d.reconcileAgents()
+
+	updated, err := d.agents.Get("stale-agent")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status != agent.StatusDead {
+		t.Errorf("agent status = %q, want %q", updated.Status, agent.StatusDead)
+	}
+}
+
+func TestReconcileAgents_LivePreserved(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a live agent (our own PID, fresh heartbeat).
+	a := &agent.Agent{
+		ID:        "live-agent",
+		Role:      agent.RoleWorker,
+		Status:    agent.StatusActive,
+		PID:       os.Getpid(),
+		Heartbeat: time.Now(),
+		StartedAt: time.Now(),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	d.reconcileAgents()
+
+	updated, err := d.agents.Get("live-agent")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status != agent.StatusActive {
+		t.Errorf("agent status = %q, want %q", updated.Status, agent.StatusActive)
+	}
+}
+
+func TestReconcileTasks_ReclaimFromDeadAgent(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a dead agent.
+	a := &agent.Agent{
+		ID:        "dead-worker",
+		Role:      agent.RoleWorker,
+		Status:    agent.StatusDead,
+		PID:       9999999,
+		Heartbeat: time.Now().Add(-5 * time.Minute),
+		StartedAt: time.Now().Add(-10 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// Create a task assigned to the dead agent.
+	tk := &task.Task{
+		Title:      "orphaned task",
+		Status:     task.StatusAssigned,
+		AssignedTo: "dead-worker",
+		Branch:     "worker/dead-worker",
+	}
+	if err := d.tasks.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	d.reconcileTasks()
+
+	updated, err := d.tasks.Get(tk.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.Status != task.StatusOpen {
+		t.Errorf("task status = %q, want %q", updated.Status, task.StatusOpen)
+	}
+	if updated.AssignedTo != "" {
+		t.Errorf("task assigned_to = %q, want empty", updated.AssignedTo)
+	}
+	if updated.Branch != "" {
+		t.Errorf("task branch = %q, want empty", updated.Branch)
+	}
+}
+
+func TestReconcileTasks_PreserveLiveAgentTasks(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a live agent.
+	a := &agent.Agent{
+		ID:        "live-worker",
+		Role:      agent.RoleWorker,
+		Status:    agent.StatusActive,
+		PID:       os.Getpid(),
+		Heartbeat: time.Now(),
+		StartedAt: time.Now(),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// Create a task assigned to the live agent.
+	tk := &task.Task{
+		Title:      "live task",
+		Status:     task.StatusAssigned,
+		AssignedTo: "live-worker",
+		Branch:     "worker/live-worker",
+	}
+	if err := d.tasks.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	d.reconcileTasks()
+
+	updated, err := d.tasks.Get(tk.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.Status != task.StatusAssigned {
+		t.Errorf("task status = %q, want %q", updated.Status, task.StatusAssigned)
+	}
+	if updated.AssignedTo != "live-worker" {
+		t.Errorf("task assigned_to = %q, want %q", updated.AssignedTo, "live-worker")
+	}
+}
+
+func TestReconcileMergeQueue_CleansOrphanedTempFiles(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	queueDir := filepath.Join(d.altDir, "merge-queue")
+
+	// Create an orphaned temp file.
+	tmpFile := filepath.Join(queueDir, ".tmp-daemon-12345")
+	if err := os.WriteFile(tmpFile, []byte("partial"), 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	// Create a normal queue item (should be preserved).
+	normalFile := filepath.Join(queueDir, "123-t-abc.json")
+	if err := os.WriteFile(normalFile, []byte(`{"task_id":"t-abc"}`), 0o644); err != nil {
+		t.Fatalf("write normal file: %v", err)
+	}
+
+	d.reconcileMergeQueue()
+
+	// Temp file should be removed.
+	if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
+		t.Error("orphaned temp file should be removed")
+	}
+	// Normal file should still exist.
+	if _, err := os.Stat(normalFile); err != nil {
+		t.Error("normal queue item should be preserved")
+	}
+}
+
+// --- Stall notification throttling ---
+
+func TestCheckProgress_StallNotificationThrottled(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	worktreeDir := t.TempDir()
+
+	// Create a worker that was recently notified about stalling.
+	a := &agent.Agent{
+		ID:                "throttled-worker",
+		Role:              agent.RoleWorker,
+		Status:            agent.StatusActive,
+		CurrentTask:       "t-abc123",
+		Worktree:          worktreeDir,
+		PID:               os.Getpid(),
+		Heartbeat:         time.Now(),
+		StartedAt:         time.Now().Add(-2 * time.Hour),
+		LastStallNotified: time.Now().Add(-10 * time.Minute), // recent
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// Create a liaison.
+	liaison := &agent.Agent{
+		ID:        "liaison-throttle",
+		Role:      agent.RoleLiaison,
+		Status:    agent.StatusActive,
+		PID:       os.Getpid(),
+		Heartbeat: time.Now(),
+		StartedAt: time.Now(),
+	}
+	if err := d.agents.Create(liaison); err != nil {
+		t.Fatalf("create liaison: %v", err)
+	}
+
+	// Mock stale commit time.
+	origGitLog := gitLogTimestamp
+	defer func() { gitLogTimestamp = origGitLog }()
+	gitLogTimestamp = func(worktree string) (string, error) {
+		return fmt.Sprintf("%d", time.Now().Add(-2*time.Hour).Unix()), nil
+	}
+
+	var tickEvents []events.Event
+	d.checkProgress(&tickEvents)
+
+	// Should NOT emit a stall event because notification was recent.
+	if len(tickEvents) != 0 {
+		t.Errorf("tick events = %d, want 0 (throttled)", len(tickEvents))
+	}
+}
+
+func TestCheckProgress_StallNotificationAfterThreshold(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	worktreeDir := t.TempDir()
+
+	// Create a worker whose last stall notification was beyond the threshold.
+	a := &agent.Agent{
+		ID:                "renotify-worker",
+		Role:              agent.RoleWorker,
+		Status:            agent.StatusActive,
+		CurrentTask:       "t-abc123",
+		Worktree:          worktreeDir,
+		PID:               os.Getpid(),
+		Heartbeat:         time.Now(),
+		StartedAt:         time.Now().Add(-3 * time.Hour),
+		LastStallNotified: time.Now().Add(-45 * time.Minute), // older than StalledThreshold
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	liaison := &agent.Agent{
+		ID:        "liaison-renotify",
+		Role:      agent.RoleLiaison,
+		Status:    agent.StatusActive,
+		PID:       os.Getpid(),
+		Heartbeat: time.Now(),
+		StartedAt: time.Now(),
+	}
+	if err := d.agents.Create(liaison); err != nil {
+		t.Fatalf("create liaison: %v", err)
+	}
+
+	origGitLog := gitLogTimestamp
+	defer func() { gitLogTimestamp = origGitLog }()
+	gitLogTimestamp = func(worktree string) (string, error) {
+		return fmt.Sprintf("%d", time.Now().Add(-2*time.Hour).Unix()), nil
+	}
+
+	var tickEvents []events.Event
+	d.checkProgress(&tickEvents)
+
+	// Should emit a stall event since threshold elapsed.
+	if len(tickEvents) != 1 {
+		t.Fatalf("tick events = %d, want 1", len(tickEvents))
+	}
+	if tickEvents[0].Type != events.WorkerStalled {
+		t.Errorf("event type = %q, want %q", tickEvents[0].Type, events.WorkerStalled)
+	}
+
+	// Verify LastStallNotified was updated.
+	updated, err := d.agents.Get("renotify-worker")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if time.Since(updated.LastStallNotified) > 5*time.Second {
+		t.Error("LastStallNotified should have been updated to ~now")
+	}
+}
+
+// --- Merge conflict handling ---
+
+func TestProcessMergeQueue_FailedItemRemoved(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Write a merge queue item that will fail (no git repo).
+	item := MergeItem{
+		TaskID:   "t-fail",
+		Branch:   "worker/nonexistent",
+		AgentID:  "w-fail",
+		QueuedAt: time.Now(),
+	}
+	data, _ := json.MarshalIndent(item, "", "  ")
+	data = append(data, '\n')
+	queuePath := filepath.Join(d.altDir, "merge-queue", fmt.Sprintf("%d-%s.json", time.Now().UnixNano(), item.TaskID))
+	if err := os.WriteFile(queuePath, data, 0o644); err != nil {
+		t.Fatalf("write queue item: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.processMergeQueue(&tickEvents)
+
+	// The failed item should have been removed.
+	if _, err := os.Stat(queuePath); !os.IsNotExist(err) {
+		t.Error("failed merge queue item should be removed to prevent infinite retry")
+	}
+}
+
+func TestProcessMergeQueue_SkipsTmpFiles(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Write a .tmp file that should be skipped.
+	tmpPath := filepath.Join(d.altDir, "merge-queue", ".tmp-daemon-orphan.json")
+	if err := os.WriteFile(tmpPath, []byte(`{"task_id":"t-tmp"}`), 0o644); err != nil {
+		t.Fatalf("write tmp file: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.processMergeQueue(&tickEvents)
+
+	// No events should be emitted (the .tmp file is skipped).
+	if len(tickEvents) != 0 {
+		t.Errorf("tick events = %d, want 0", len(tickEvents))
+	}
+}
+
+// --- Concurrent atomic write safety ---
+
+func TestAtomicWrite_ConcurrentSafety(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "concurrent.json")
+
+	const numGoroutines = 10
+	const writesPerGoroutine = 50
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for g := 0; g < numGoroutines; g++ {
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < writesPerGoroutine; i++ {
+				data := []byte(fmt.Sprintf(`{"writer":%d,"seq":%d}`, id, i))
+				if err := atomicWrite(path, data); err != nil {
+					t.Errorf("goroutine %d write %d: %v", id, i, err)
+					return
+				}
+			}
+		}(g)
+	}
+
+	wg.Wait()
+
+	// Verify the file contains valid JSON (no partial reads).
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Errorf("file content is not valid JSON after concurrent writes: %v (content: %q)", err, string(data))
+	}
+
+	// Verify no temp files left behind.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Errorf("leftover temp file: %s", e.Name())
+		}
+	}
+}
+
+// --- Budget validation ---
+
+func TestNew_InvalidConstraints(t *testing.T) {
+	root := setupTestProject(t)
+	altDir := filepath.Join(root, ".alt")
+
+	// Write a config with invalid constraints (negative budget).
+	cfg := config.NewConfig()
+	cfg.Constraints.BudgetCeiling = -1
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	if err := os.WriteFile(filepath.Join(altDir, "config.json"), data, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := New(root)
+	if err == nil {
+		t.Fatal("New: expected error for negative budget ceiling")
+	}
+}
+
+func TestNew_ZeroWorkers(t *testing.T) {
+	root := setupTestProject(t)
+	altDir := filepath.Join(root, ".alt")
+
+	cfg := config.NewConfig()
+	cfg.Constraints.MaxWorkers = 0
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	if err := os.WriteFile(filepath.Join(altDir, "config.json"), data, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := New(root)
+	if err == nil {
+		t.Fatal("New: expected error for zero max workers")
+	}
 }
 
 func TestSendStop_NotRunning(t *testing.T) {

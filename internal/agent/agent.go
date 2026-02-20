@@ -39,8 +39,9 @@ type Agent struct {
 	TmuxSession  string    `json:"tmux_session,omitempty"`
 	PID          int       `json:"pid,omitempty"`
 	Heartbeat    time.Time `json:"heartbeat"`
-	LastProgress string    `json:"last_progress,omitempty"`
-	StartedAt    time.Time `json:"started_at"`
+	LastProgress    string    `json:"last_progress,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
+	LastStallNotified time.Time `json:"last_stall_notified,omitempty"`
 }
 
 var (

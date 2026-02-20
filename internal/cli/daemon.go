@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/anthropics/altera/internal/daemon"
 	"github.com/spf13/cobra"
@@ -26,14 +27,20 @@ var daemonStartCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := projectRoot()
 		if err != nil {
-			return fmt.Errorf("not an altera project: %w", err)
+			return err
 		}
 		d, err := daemon.New(root)
 		if err != nil {
 			return err
 		}
 		fmt.Println("Daemon starting...")
-		return d.Run()
+		if err := d.Run(); err != nil {
+			if strings.Contains(err.Error(), "flock") {
+				return fmt.Errorf("daemon is already running")
+			}
+			return err
+		}
+		return nil
 	},
 }
 
@@ -43,7 +50,7 @@ var daemonStopCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {
-			return fmt.Errorf("not an altera project: %w", err)
+			return err
 		}
 		if err := daemon.SendStop(altDir); err != nil {
 			return err
@@ -59,7 +66,7 @@ var daemonStatusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {
-			return fmt.Errorf("not an altera project: %w", err)
+			return err
 		}
 		st := daemon.ReadStatus(altDir)
 		if st.Running {

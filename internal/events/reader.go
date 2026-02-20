@@ -55,6 +55,9 @@ func NewReader(path string) *Reader {
 func (r *Reader) Read(filter Filter) ([]Event, error) {
 	f, err := os.Open(r.path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("events: open: %w", err)
 	}
 	defer f.Close()
@@ -70,7 +73,7 @@ func (r *Reader) Read(filter Filter) ([]Event, error) {
 		}
 		var ev Event
 		if err := json.Unmarshal(line, &ev); err != nil {
-			return nil, fmt.Errorf("events: decode line: %w", err)
+			continue // skip corrupt lines
 		}
 		if filter.matches(&ev) {
 			result = append(result, ev)
