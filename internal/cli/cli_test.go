@@ -1,0 +1,375 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/anthropics/altera/internal/events"
+	"github.com/anthropics/altera/internal/task"
+)
+
+// executeCmd runs rootCmd with the given args and returns stdout output.
+func executeCmd(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs(args)
+	err := rootCmd.Execute()
+	return buf.String(), err
+}
+
+// setupProject creates a temporary .alt project directory and returns
+// the project root. It changes the working directory to root and
+// restores it on cleanup.
+func setupProject(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	altDir := filepath.Join(root, ".alt")
+	for _, sub := range []string{"tasks", "agents", "messages", "messages/archive", "rigs"} {
+		if err := os.MkdirAll(filepath.Join(altDir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(orig) })
+
+	return root
+}
+
+func TestRootCommand(t *testing.T) {
+	// Root command with no args should not error (prints help).
+	_, err := executeCmd(t)
+	if err != nil {
+		t.Fatalf("root command failed: %v", err)
+	}
+}
+
+func TestSubcommandRegistration(t *testing.T) {
+	expected := []string{
+		"status", "task", "log", "rig", "work",
+		"daemon", "heartbeat", "checkpoint", "liaison",
+	}
+	cmds := rootCmd.Commands()
+	names := make(map[string]bool)
+	for _, c := range cmds {
+		names[c.Name()] = true
+	}
+	for _, name := range expected {
+		if !names[name] {
+			t.Errorf("expected subcommand %q not found", name)
+		}
+	}
+}
+
+func TestTaskSubcommands(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "task" {
+			expected := []string{"list", "show", "create"}
+			subs := c.Commands()
+			names := make(map[string]bool)
+			for _, s := range subs {
+				names[s.Name()] = true
+			}
+			for _, name := range expected {
+				if !names[name] {
+					t.Errorf("expected task subcommand %q not found", name)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("task command not found")
+}
+
+func TestDaemonSubcommands(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "daemon" {
+			expected := []string{"start", "stop", "status"}
+			subs := c.Commands()
+			names := make(map[string]bool)
+			for _, s := range subs {
+				names[s.Name()] = true
+			}
+			for _, name := range expected {
+				if !names[name] {
+					t.Errorf("expected daemon subcommand %q not found", name)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("daemon command not found")
+}
+
+func TestLiaisonSubcommands(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "liaison" {
+			expected := []string{"prime", "check-messages"}
+			subs := c.Commands()
+			names := make(map[string]bool)
+			for _, s := range subs {
+				names[s.Name()] = true
+			}
+			for _, name := range expected {
+				if !names[name] {
+					t.Errorf("expected liaison subcommand %q not found", name)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("liaison command not found")
+}
+
+func TestRigSubcommands(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "rig" {
+			expected := []string{"add", "list"}
+			subs := c.Commands()
+			names := make(map[string]bool)
+			for _, s := range subs {
+				names[s.Name()] = true
+			}
+			for _, name := range expected {
+				if !names[name] {
+					t.Errorf("expected rig subcommand %q not found", name)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("rig command not found")
+}
+
+func TestTaskListFlags(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "task" {
+			for _, s := range c.Commands() {
+				if s.Name() == "list" {
+					for _, flag := range []string{"status", "rig", "assignee", "tag"} {
+						f := s.Flags().Lookup(flag)
+						if f == nil {
+							t.Errorf("task list missing --%s flag", flag)
+						}
+					}
+					return
+				}
+			}
+		}
+	}
+	t.Fatal("task list command not found")
+}
+
+func TestTaskShowRequiresArg(t *testing.T) {
+	root := setupProject(t)
+	_ = root
+	_, err := executeCmd(t, "task", "show")
+	if err == nil {
+		t.Error("expected error when no task ID provided")
+	}
+}
+
+func TestTaskCreateRequiresTitle(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "task", "create")
+	if err == nil {
+		t.Error("expected error when --title not provided")
+	}
+}
+
+func TestTaskCreateAndShow(t *testing.T) {
+	root := setupProject(t)
+
+	// Create a task directly via the store so we can verify show works.
+	store, err := task.NewStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk := &task.Task{
+		ID:    "t-test01",
+		Title: "Test Task",
+	}
+	if err := store.Create(tk); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = executeCmd(t, "task", "show", "t-test01")
+	if err != nil {
+		t.Fatalf("task show failed: %v", err)
+	}
+}
+
+func TestTaskListEmpty(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "task", "list")
+	if err != nil {
+		t.Fatalf("task list failed: %v", err)
+	}
+}
+
+func TestLogEmpty(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "log")
+	if err != nil {
+		t.Fatalf("log command failed: %v", err)
+	}
+}
+
+func TestLogWithEvents(t *testing.T) {
+	root := setupProject(t)
+
+	evtPath := filepath.Join(root, ".alt", "events.jsonl")
+	writer := events.NewWriter(evtPath)
+	if err := writer.Append(events.Event{
+		Timestamp: time.Now(),
+		Type:      events.TaskCreated,
+		TaskID:    "t-abc123",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := executeCmd(t, "log")
+	if err != nil {
+		t.Fatalf("log command failed: %v", err)
+	}
+}
+
+func TestLogLastFlag(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "log" {
+			f := c.Flags().Lookup("last")
+			if f == nil {
+				t.Error("log missing --last flag")
+			}
+			return
+		}
+	}
+	t.Fatal("log command not found")
+}
+
+func TestHeartbeatRequiresArg(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "heartbeat")
+	if err == nil {
+		t.Error("expected error when no agent ID provided")
+	}
+}
+
+func TestCheckpointRequiresArg(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "checkpoint")
+	if err == nil {
+		t.Error("expected error when no task ID provided")
+	}
+}
+
+func TestLiaisonCheckMessagesRequiresArg(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "liaison", "check-messages")
+	if err == nil {
+		t.Error("expected error when no agent ID provided")
+	}
+}
+
+func TestRigAddRequiresName(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "rig", "add")
+	if err == nil {
+		t.Error("expected error when no rig name provided")
+	}
+}
+
+func TestRigAddAndList(t *testing.T) {
+	root := setupProject(t)
+
+	// Write a minimal config so rig add can load it.
+	cfgPath := filepath.Join(root, ".alt", "config.json")
+	cfgData, _ := json.Marshal(map[string]any{
+		"rigs":        map[string]any{},
+		"constraints": map[string]any{},
+	})
+	if err := os.WriteFile(cfgPath, cfgData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := executeCmd(t, "rig", "add", "myrig", "--repo", "/tmp/repo", "--branch", "develop")
+	if err != nil {
+		t.Fatalf("rig add failed: %v", err)
+	}
+
+	_, err = executeCmd(t, "rig", "list")
+	if err != nil {
+		t.Fatalf("rig list failed: %v", err)
+	}
+}
+
+func TestStatusCommand(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "status")
+	if err != nil {
+		t.Fatalf("status command failed: %v", err)
+	}
+}
+
+func TestRigAddFlags(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "rig" {
+			for _, s := range c.Commands() {
+				if s.Name() == "add" {
+					for _, flag := range []string{"repo", "branch", "test"} {
+						f := s.Flags().Lookup(flag)
+						if f == nil {
+							t.Errorf("rig add missing --%s flag", flag)
+						}
+					}
+					return
+				}
+			}
+		}
+	}
+	t.Fatal("rig add command not found")
+}
+
+func TestCheckpointMessageFlag(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "checkpoint" {
+			f := c.Flags().Lookup("message")
+			if f == nil {
+				t.Error("checkpoint missing --message flag")
+			}
+			return
+		}
+	}
+	t.Fatal("checkpoint command not found")
+}
+
+func TestTaskCreateFlags(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "task" {
+			for _, s := range c.Commands() {
+				if s.Name() == "create" {
+					for _, flag := range []string{"title", "description"} {
+						f := s.Flags().Lookup(flag)
+						if f == nil {
+							t.Errorf("task create missing --%s flag", flag)
+						}
+					}
+					return
+				}
+			}
+		}
+	}
+	t.Fatal("task create command not found")
+}
