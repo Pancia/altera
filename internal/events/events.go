@@ -25,6 +25,8 @@ const (
 	MergeFailed    Type = "merge_failed"
 	BudgetExceeded Type = "budget_exceeded"
 	WorkerStalled  Type = "worker_stalled"
+	DaemonStarted  Type = "daemon_started"
+	DaemonShutdown Type = "daemon_shutdown"
 )
 
 // Event represents a single event in the system log.

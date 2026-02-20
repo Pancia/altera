@@ -276,6 +276,41 @@ func TestAtomicWrite(t *testing.T) {
 	}
 }
 
+func TestConstraintsValidate_Valid(t *testing.T) {
+	c := Constraints{BudgetCeiling: 100, MaxWorkers: 4, MaxQueueDepth: 10}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: unexpected error: %v", err)
+	}
+}
+
+func TestConstraintsValidate_ZeroBudget(t *testing.T) {
+	c := Constraints{BudgetCeiling: 0, MaxWorkers: 4, MaxQueueDepth: 10}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: zero budget should be valid: %v", err)
+	}
+}
+
+func TestConstraintsValidate_NegativeBudget(t *testing.T) {
+	c := Constraints{BudgetCeiling: -1, MaxWorkers: 4, MaxQueueDepth: 10}
+	if err := c.Validate(); err == nil {
+		t.Fatal("Validate: expected error for negative budget")
+	}
+}
+
+func TestConstraintsValidate_ZeroWorkers(t *testing.T) {
+	c := Constraints{BudgetCeiling: 100, MaxWorkers: 0, MaxQueueDepth: 10}
+	if err := c.Validate(); err == nil {
+		t.Fatal("Validate: expected error for zero workers")
+	}
+}
+
+func TestConstraintsValidate_ZeroQueueDepth(t *testing.T) {
+	c := Constraints{BudgetCeiling: 100, MaxWorkers: 4, MaxQueueDepth: 0}
+	if err := c.Validate(); err == nil {
+		t.Fatal("Validate: expected error for zero queue depth")
+	}
+}
+
 func TestLoadNilRigsMap(t *testing.T) {
 	// Verify that a config with null rigs field gets initialized
 	tmp := t.TempDir()

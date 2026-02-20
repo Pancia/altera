@@ -9,12 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,7 +53,8 @@ type Daemon struct {
 	pidFile  string   // path to .alt/daemon.pid
 	lockFile *os.File // held flock on pid file
 
-	logger   *log.Logger
+	logger   *slog.Logger
+	tickNum  int64
 	shutdown chan struct{} // closed to signal shutdown
 }
 
@@ -93,9 +95,13 @@ func New(rootDir string) (*Daemon, error) {
 		return nil, fmt.Errorf("daemon: create merge-queue dir: %w", err)
 	}
 
+	if err := cfg.Constraints.Validate(); err != nil {
+		return nil, fmt.Errorf("daemon: invalid constraints: %w", err)
+	}
+
 	checker := constraints.NewChecker(cfg.Constraints, agentStore, evReader, mergeQueueDir)
 
-	logger := log.New(os.Stderr, "daemon: ", log.LstdFlags|log.Lmsgprefix)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil)).With("component", "daemon")
 
 	return &Daemon{
 		altDir:   altDir,
@@ -123,7 +129,15 @@ func (d *Daemon) Run() error {
 	defer d.releaseLock()
 
 	d.installSignalHandler()
-	d.logger.Println("started")
+
+	// Reconcile stale state from prior runs before first tick.
+	d.reconcile()
+
+	d.events.Append(events.Event{
+		Timestamp: time.Now(),
+		Type:      events.DaemonStarted,
+	})
+	d.logger.Info("started")
 
 	// Run one tick immediately, then loop on the interval.
 	d.tick()
@@ -134,7 +148,11 @@ func (d *Daemon) Run() error {
 	for {
 		select {
 		case <-d.shutdown:
-			d.logger.Println("shutting down gracefully")
+			d.logger.Info("shutting down gracefully")
+			d.events.Append(events.Event{
+				Timestamp: time.Now(),
+				Type:      events.DaemonShutdown,
+			})
 			return nil
 		case <-ticker.C:
 			d.tick()
@@ -152,9 +170,115 @@ func (d *Daemon) Stop() {
 	}
 }
 
+// reconcile cleans up stale state left by a prior daemon run that may
+// have crashed or been killed. It is called once at startup before the
+// first tick.
+func (d *Daemon) reconcile() {
+	d.logger.Info("reconcile", "step", "start")
+	d.reconcileAgents()
+	d.reconcileTasks()
+	d.reconcileMergeQueue()
+	d.logger.Info("reconcile", "step", "complete")
+}
+
+// reconcileAgents checks all active agents for liveness, marking dead
+// ones and killing orphaned tmux sessions.
+func (d *Daemon) reconcileAgents() {
+	active, err := d.agents.ListByStatus(agent.StatusActive)
+	if err != nil {
+		d.logger.Error("reconcile agents: list active", "error", err)
+		return
+	}
+	for _, a := range active {
+		if agent.CheckLiveness(a) {
+			continue
+		}
+		d.logger.Info("reconcile agents: marking dead", "agent", a.ID, "role", a.Role)
+		a.Status = agent.StatusDead
+		if err := d.agents.Update(a); err != nil {
+			d.logger.Error("reconcile agents: update", "agent", a.ID, "error", err)
+			continue
+		}
+		if a.TmuxSession != "" && tmux.SessionExists(a.TmuxSession) {
+			if err := tmux.KillSession(a.TmuxSession); err != nil {
+				d.logger.Error("reconcile agents: kill tmux", "session", a.TmuxSession, "error", err)
+			}
+		}
+	}
+}
+
+// reconcileTasks finds tasks assigned to dead or missing agents and
+// resets them to open status.
+func (d *Daemon) reconcileTasks() {
+	for _, status := range []task.Status{task.StatusAssigned, task.StatusInProgress} {
+		tasks, err := d.tasks.List(task.Filter{Status: status})
+		if err != nil {
+			d.logger.Error("reconcile tasks: list", "status", status, "error", err)
+			continue
+		}
+		for _, t := range tasks {
+			if t.AssignedTo == "" {
+				continue
+			}
+			a, err := d.agents.Get(t.AssignedTo)
+			if err != nil || a.Status == agent.StatusDead {
+				d.logger.Info("reconcile tasks: reclaiming", "task", t.ID, "agent", t.AssignedTo)
+				branch := t.Branch
+				if err := d.reclaimTask(t.ID); err != nil {
+					d.logger.Error("reconcile tasks: reclaim", "task", t.ID, "error", err)
+					continue
+				}
+				// Clean up git resources from the dead worker.
+				if branch != "" {
+					d.cleanupBranch(branch)
+				}
+			}
+		}
+	}
+}
+
+// reconcileMergeQueue removes orphaned .tmp-* files from the merge-queue
+// directory left by interrupted atomic writes.
+func (d *Daemon) reconcileMergeQueue() {
+	queueDir := filepath.Join(d.altDir, "merge-queue")
+	entries, err := os.ReadDir(queueDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		d.logger.Error("reconcile merge queue: read dir", "error", err)
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			path := filepath.Join(queueDir, e.Name())
+			d.logger.Info("reconcile merge queue: removing temp file", "file", e.Name())
+			os.Remove(path)
+		}
+	}
+}
+
+// cleanupBranch deletes a worktree (if it exists) and its branch.
+func (d *Daemon) cleanupBranch(branch string) {
+	// Derive worktree path from branch name: "worker/{id}" -> ".alt/worktrees/{id}"
+	parts := strings.SplitN(branch, "/", 2)
+	if len(parts) == 2 {
+		worktreePath := filepath.Join(d.rootDir, ".alt", "worktrees", parts[1])
+		if _, err := os.Stat(worktreePath); err == nil {
+			if err := git.DeleteWorktree(d.rootDir, worktreePath); err != nil {
+				d.logger.Error("cleanup: delete worktree", "path", worktreePath, "error", err)
+			}
+		}
+	}
+	if err := git.DeleteBranch(d.rootDir, branch); err != nil {
+		d.logger.Error("cleanup: delete branch", "branch", branch, "error", err)
+	}
+}
+
 // tick runs all seven daemon steps in sequence.
 func (d *Daemon) tick() {
-	d.logger.Println("tick start")
+	d.tickNum++
+	d.logger.Info("tick start", "tick", d.tickNum)
 	start := time.Now()
 
 	var tickEvents []events.Event
@@ -167,7 +291,7 @@ func (d *Daemon) tick() {
 	d.checkConstraints(&tickEvents)
 	d.emitEvents(tickEvents)
 
-	d.logger.Printf("tick complete (%s)", time.Since(start).Round(time.Millisecond))
+	d.logger.Info("tick complete", "tick", d.tickNum, "duration", time.Since(start).Round(time.Millisecond))
 }
 
 // --- Step 1: CheckAgentLiveness ---
@@ -177,7 +301,7 @@ func (d *Daemon) tick() {
 func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 	active, err := d.agents.ListByStatus(agent.StatusActive)
 	if err != nil {
-		d.logger.Printf("liveness: list active agents: %v", err)
+		d.logger.Error("liveness: list active agents", "error", err)
 		return
 	}
 
@@ -186,12 +310,12 @@ func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 			continue
 		}
 
-		d.logger.Printf("liveness: agent %s is dead (role=%s, task=%s)", a.ID, a.Role, a.CurrentTask)
+		d.logger.Info("liveness: agent dead", "agent", a.ID, "role", a.Role, "task", a.CurrentTask)
 
 		// Mark agent as dead.
 		a.Status = agent.StatusDead
 		if err := d.agents.Update(a); err != nil {
-			d.logger.Printf("liveness: update agent %s: %v", a.ID, err)
+			d.logger.Error("liveness: update agent", "agent", a.ID, "error", err)
 			continue
 		}
 
@@ -202,21 +326,27 @@ func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 			TaskID:    a.CurrentTask,
 		})
 
-		// Reclaim task: force status back to open, clear assigned_to.
-		// This bypasses normal transition validation since it's a
-		// recovery operation for dead agents.
+		// Reclaim task and clean up git resources.
 		if a.CurrentTask != "" {
+			t, _ := d.tasks.Get(a.CurrentTask)
+			var branch string
+			if t != nil {
+				branch = t.Branch
+			}
 			if err := d.reclaimTask(a.CurrentTask); err != nil {
-				d.logger.Printf("liveness: reclaim task %s: %v", a.CurrentTask, err)
+				d.logger.Error("liveness: reclaim task", "task", a.CurrentTask, "error", err)
 			} else {
-				d.logger.Printf("liveness: reclaimed task %s", a.CurrentTask)
+				d.logger.Info("liveness: reclaimed task", "task", a.CurrentTask)
+				if branch != "" {
+					d.cleanupBranch(branch)
+				}
 			}
 		}
 
 		// Clean up tmux session if it exists.
 		if a.TmuxSession != "" && tmux.SessionExists(a.TmuxSession) {
 			if err := tmux.KillSession(a.TmuxSession); err != nil {
-				d.logger.Printf("liveness: kill tmux session %s: %v", a.TmuxSession, err)
+				d.logger.Error("liveness: kill tmux session", "session", a.TmuxSession, "error", err)
 			}
 		}
 	}
@@ -231,6 +361,7 @@ func (d *Daemon) reclaimTask(taskID string) error {
 	}
 	t.Status = task.StatusOpen
 	t.AssignedTo = ""
+	t.Branch = ""
 	t.UpdatedAt = time.Now().UTC()
 	return d.tasks.ForceWrite(t)
 }
@@ -243,7 +374,7 @@ func (d *Daemon) reclaimTask(taskID string) error {
 func (d *Daemon) checkProgress(tickEvents *[]events.Event) {
 	workers, err := d.agents.ListByRole(agent.RoleWorker)
 	if err != nil {
-		d.logger.Printf("progress: list workers: %v", err)
+		d.logger.Error("progress: list workers", "error", err)
 		return
 	}
 
@@ -259,7 +390,12 @@ func (d *Daemon) checkProgress(tickEvents *[]events.Event) {
 		}
 
 		if time.Since(lastCommitTime) > StalledThreshold {
-			d.logger.Printf("progress: worker %s stalled (last commit %s ago)", w.ID, time.Since(lastCommitTime).Round(time.Second))
+			// Throttle stall notifications: skip if already notified within threshold.
+			if !w.LastStallNotified.IsZero() && time.Since(w.LastStallNotified) < StalledThreshold {
+				continue
+			}
+
+			d.logger.Info("progress: worker stalled", "agent", w.ID, "last_commit_ago", time.Since(lastCommitTime).Round(time.Second))
 
 			*tickEvents = append(*tickEvents, events.Event{
 				Timestamp: time.Now(),
@@ -274,7 +410,7 @@ func (d *Daemon) checkProgress(tickEvents *[]events.Event) {
 			// Send help message to liaison.
 			liaisons, err := d.agents.ListByRole(agent.RoleLiaison)
 			if err != nil || len(liaisons) == 0 {
-				d.logger.Printf("progress: no liaison to notify about stalled worker %s", w.ID)
+				d.logger.Info("progress: no liaison to notify", "agent", w.ID)
 				continue
 			}
 			_, err = d.messages.Create(
@@ -289,7 +425,13 @@ func (d *Daemon) checkProgress(tickEvents *[]events.Event) {
 				},
 			)
 			if err != nil {
-				d.logger.Printf("progress: send help message: %v", err)
+				d.logger.Error("progress: send help message", "error", err)
+			}
+
+			// Update LastStallNotified and persist.
+			w.LastStallNotified = time.Now()
+			if err := d.agents.Update(w); err != nil {
+				d.logger.Error("progress: update agent stall time", "agent", w.ID, "error", err)
 			}
 		}
 	}
@@ -320,20 +462,20 @@ func (d *Daemon) lastCommitTime(worktree string) (time.Time, error) {
 func (d *Daemon) assignTasks(tickEvents *[]events.Event) {
 	ready, err := d.tasks.FindReady()
 	if err != nil {
-		d.logger.Printf("assign: find ready tasks: %v", err)
+		d.logger.Error("assign: find ready tasks", "error", err)
 		return
 	}
 
 	for _, t := range ready {
 		ok, reason := d.checker.CanSpawnWorker()
 		if !ok {
-			d.logger.Printf("assign: cannot spawn worker: %s", reason)
+			d.logger.Info("assign: cannot spawn worker", "reason", reason)
 			break // constraints apply globally, no point continuing
 		}
 
 		agentID, err := d.spawnWorker(t)
 		if err != nil {
-			d.logger.Printf("assign: spawn worker for task %s: %v", t.ID, err)
+			d.logger.Error("assign: spawn worker", "task", t.ID, "error", err)
 			continue
 		}
 
@@ -420,7 +562,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		return "", fmt.Errorf("assign task: %w", err)
 	}
 
-	d.logger.Printf("assign: spawned worker %s for task %s", agentID, t.ID)
+	d.logger.Info("assign: spawned worker", "agent", agentID, "task", t.ID)
 	return agentID, nil
 }
 
@@ -431,7 +573,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 func (d *Daemon) processMessages(tickEvents *[]events.Event) {
 	msgs, err := d.messages.ListPending("daemon")
 	if err != nil {
-		d.logger.Printf("messages: list pending: %v", err)
+		d.logger.Error("messages: list pending", "error", err)
 		return
 	}
 
@@ -442,12 +584,12 @@ func (d *Daemon) processMessages(tickEvents *[]events.Event) {
 		case message.TypeHelp:
 			d.handleHelp(msg)
 		default:
-			d.logger.Printf("messages: unhandled type %s from %s", msg.Type, msg.From)
+			d.logger.Info("messages: unhandled type", "type", msg.Type, "from", msg.From)
 		}
 
 		// Archive processed message.
 		if err := d.messages.Archive(msg.ID); err != nil {
-			d.logger.Printf("messages: archive %s: %v", msg.ID, err)
+			d.logger.Error("messages: archive", "message", msg.ID, "error", err)
 		}
 	}
 }
@@ -457,7 +599,7 @@ func (d *Daemon) processMessages(tickEvents *[]events.Event) {
 func (d *Daemon) handleTaskDone(msg *message.Message, tickEvents *[]events.Event) {
 	taskID := msg.TaskID
 	if taskID == "" {
-		d.logger.Printf("messages: task_done without task_id from %s", msg.From)
+		d.logger.Info("messages: task_done without task_id", "from", msg.From)
 		return
 	}
 
@@ -469,7 +611,7 @@ func (d *Daemon) handleTaskDone(msg *message.Message, tickEvents *[]events.Event
 		}
 		return nil
 	}); err != nil {
-		d.logger.Printf("messages: mark task %s done: %v", taskID, err)
+		d.logger.Error("messages: mark task done", "task", taskID, "error", err)
 		return
 	}
 
@@ -483,11 +625,11 @@ func (d *Daemon) handleTaskDone(msg *message.Message, tickEvents *[]events.Event
 	// Add to merge queue.
 	t, err := d.tasks.Get(taskID)
 	if err != nil {
-		d.logger.Printf("messages: get task %s for merge queue: %v", taskID, err)
+		d.logger.Error("messages: get task for merge queue", "task", taskID, "error", err)
 		return
 	}
 	if err := d.addToMergeQueue(t); err != nil {
-		d.logger.Printf("messages: add task %s to merge queue: %v", taskID, err)
+		d.logger.Error("messages: add task to merge queue", "task", taskID, "error", err)
 	}
 }
 
@@ -495,7 +637,7 @@ func (d *Daemon) handleTaskDone(msg *message.Message, tickEvents *[]events.Event
 func (d *Daemon) handleHelp(msg *message.Message) {
 	liaisons, err := d.agents.ListByRole(agent.RoleLiaison)
 	if err != nil || len(liaisons) == 0 {
-		d.logger.Printf("messages: no liaison available to handle help from %s", msg.From)
+		d.logger.Info("messages: no liaison available", "from", msg.From)
 		return
 	}
 
@@ -507,7 +649,7 @@ func (d *Daemon) handleHelp(msg *message.Message) {
 		msg.Payload,
 	)
 	if err != nil {
-		d.logger.Printf("messages: forward help to liaison: %v", err)
+		d.logger.Error("messages: forward help to liaison", "error", err)
 	}
 }
 
@@ -530,20 +672,20 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 		if os.IsNotExist(err) {
 			return
 		}
-		d.logger.Printf("merge: read queue dir: %v", err)
+		d.logger.Error("merge: read queue dir", "error", err)
 		return
 	}
 
 	// Process items in filename order (FIFO by timestamp prefix).
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" || strings.HasPrefix(e.Name(), ".tmp-") {
 			continue
 		}
 
 		// Check for shutdown between merge attempts.
 		select {
 		case <-d.shutdown:
-			d.logger.Println("merge: shutdown during queue processing")
+			d.logger.Info("merge: shutdown during queue processing")
 			return
 		default:
 		}
@@ -551,13 +693,13 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 		itemPath := filepath.Join(queueDir, e.Name())
 		data, err := os.ReadFile(itemPath)
 		if err != nil {
-			d.logger.Printf("merge: read queue item %s: %v", e.Name(), err)
+			d.logger.Error("merge: read queue item", "file", e.Name(), "error", err)
 			continue
 		}
 
 		var item MergeItem
 		if err := json.Unmarshal(data, &item); err != nil {
-			d.logger.Printf("merge: parse queue item %s: %v", e.Name(), err)
+			d.logger.Error("merge: parse queue item", "file", e.Name(), "error", err)
 			continue
 		}
 
@@ -570,7 +712,7 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 
 		result, err := git.Merge(d.rootDir, item.Branch)
 		if err != nil {
-			d.logger.Printf("merge: merge branch %s: %v", item.Branch, err)
+			d.logger.Error("merge: merge branch", "branch", item.Branch, "error", err)
 			*tickEvents = append(*tickEvents, events.Event{
 				Timestamp: time.Now(),
 				Type:      events.MergeFailed,
@@ -578,11 +720,13 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 				TaskID:    item.TaskID,
 				Data:      map[string]any{"error": err.Error()},
 			})
+			// Remove failed item to prevent infinite retry.
+			os.Remove(itemPath)
 			continue
 		}
 
 		if !result.Clean {
-			d.logger.Printf("merge: conflict merging %s: %v", item.Branch, result.Conflicts)
+			d.logger.Info("merge: conflict", "branch", item.Branch, "conflicts", result.Conflicts)
 			git.AbortMerge(d.rootDir)
 			*tickEvents = append(*tickEvents, events.Event{
 				Timestamp: time.Now(),
@@ -608,7 +752,7 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 			continue
 		}
 
-		d.logger.Printf("merge: successfully merged %s", item.Branch)
+		d.logger.Info("merge: success", "branch", item.Branch)
 		*tickEvents = append(*tickEvents, events.Event{
 			Timestamp: time.Now(),
 			Type:      events.MergeSuccess,
@@ -656,9 +800,9 @@ func (d *Daemon) addToMergeQueue(t *task.Task) error {
 // If any constraint is violated, it emits an event.
 func (d *Daemon) checkConstraints(tickEvents *[]events.Event) {
 	if ok, reason, err := d.checker.CheckBudget(); err != nil {
-		d.logger.Printf("constraints: budget check error: %v", err)
+		d.logger.Error("constraints: budget check", "error", err)
 	} else if !ok {
-		d.logger.Printf("constraints: %s", reason)
+		d.logger.Info("constraints: budget exceeded", "reason", reason)
 		*tickEvents = append(*tickEvents, events.Event{
 			Timestamp: time.Now(),
 			Type:      events.BudgetExceeded,
@@ -675,7 +819,7 @@ func (d *Daemon) emitEvents(tickEvents []events.Event) {
 		return
 	}
 	if err := d.events.Append(tickEvents...); err != nil {
-		d.logger.Printf("events: append: %v", err)
+		d.logger.Error("events: append", "error", err)
 	}
 }
 
@@ -721,12 +865,17 @@ func (d *Daemon) releaseLock() {
 // installSignalHandler sets up SIGTERM and SIGINT to trigger graceful
 // shutdown. The handler finishes the current tick before exiting.
 func (d *Daemon) installSignalHandler() {
-	sigCh := make(chan os.Signal, 1)
+	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		sig := <-sigCh
-		d.logger.Printf("received signal: %s", sig)
+		d.logger.Info("received signal, shutting down gracefully", "signal", sig)
 		d.Stop()
+
+		// Second signal forces immediate exit.
+		sig = <-sigCh
+		d.logger.Error("received second signal, forcing exit", "signal", sig)
+		os.Exit(1)
 	}()
 }
 

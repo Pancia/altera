@@ -10,9 +10,10 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "alt",
-	Short: "Altera - multi-agent orchestration system",
-	Long:  `Altera is a multi-agent orchestration system with filesystem-based state (.alt/ directory).`,
+	Use:           "alt",
+	Short:         "Altera - multi-agent orchestration system",
+	Long:          `Altera is a multi-agent orchestration system with filesystem-based state (.alt/ directory).`,
+	SilenceUsage:  true,
 }
 
 func Execute() error {
@@ -26,7 +27,11 @@ func resolveAltDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("getting working directory: %w", err)
 	}
-	return config.FindRoot(cwd)
+	altDir, err := config.FindRoot(cwd)
+	if err != nil {
+		return "", fmt.Errorf("not an altera project (no .alt/ directory found)")
+	}
+	return altDir, nil
 }
 
 // projectRoot returns the parent of the .alt directory.

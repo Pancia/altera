@@ -361,9 +361,12 @@ func TestReadEmptyFilter(t *testing.T) {
 
 func TestReadNonexistentFile(t *testing.T) {
 	r := NewReader(filepath.Join(t.TempDir(), "nonexistent.jsonl"))
-	_, err := r.ReadAll()
-	if err == nil {
-		t.Fatal("Expected error reading nonexistent file")
+	events, err := r.ReadAll()
+	if err != nil {
+		t.Fatalf("Expected nil error for nonexistent file, got: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("Expected 0 events for nonexistent file, got %d", len(events))
 	}
 }
 
@@ -540,10 +543,11 @@ func TestAllEventTypes(t *testing.T) {
 		AgentSpawned, AgentDied,
 		MergeStarted, MergeSuccess, MergeConflict, MergeFailed,
 		BudgetExceeded, WorkerStalled,
+		DaemonStarted, DaemonShutdown,
 	}
 
-	if len(types) != 13 {
-		t.Errorf("Expected 13 event types, got %d", len(types))
+	if len(types) != 15 {
+		t.Errorf("Expected 15 event types, got %d", len(types))
 	}
 
 	seen := make(map[Type]bool)
@@ -555,6 +559,45 @@ func TestAllEventTypes(t *testing.T) {
 			t.Errorf("Duplicate event type: %v", typ)
 		}
 		seen[typ] = true
+	}
+}
+
+func TestReadCorruptLineSkipped(t *testing.T) {
+	path := tmpPath(t)
+	w := NewWriter(path)
+
+	// Write a valid event.
+	mustWrite(t, w, testEvent(TaskCreated, "a1", "t1"))
+
+	// Append a corrupt line directly to the file.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	f.WriteString("{corrupt json line\n")
+	f.Close()
+
+	// Write another valid event.
+	mustWrite(t, w, testEvent(TaskDone, "a1", "t1"))
+
+	r := NewReader(path)
+	events, err := r.ReadAll()
+	if err != nil {
+		t.Fatalf("ReadAll: unexpected error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Errorf("expected 2 events (skipping corrupt line), got %d", len(events))
+	}
+}
+
+func TestReadMissingFile_ReturnsEmpty(t *testing.T) {
+	r := NewReader(filepath.Join(t.TempDir(), "does-not-exist.jsonl"))
+	events, err := r.ReadAll()
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected 0 events, got %d", len(events))
 	}
 }
 

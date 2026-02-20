@@ -22,6 +22,20 @@ type Constraints struct {
 	MaxQueueDepth int     `json:"max_queue_depth"`
 }
 
+// Validate checks that constraint values are within acceptable ranges.
+func (c Constraints) Validate() error {
+	if c.BudgetCeiling < 0 {
+		return fmt.Errorf("budget_ceiling must be >= 0, got %v", c.BudgetCeiling)
+	}
+	if c.MaxWorkers < 1 {
+		return fmt.Errorf("max_workers must be >= 1, got %d", c.MaxWorkers)
+	}
+	if c.MaxQueueDepth < 1 {
+		return fmt.Errorf("max_queue_depth must be >= 1, got %d", c.MaxQueueDepth)
+	}
+	return nil
+}
+
 // RigConfig holds per-rig settings stored in .alt/rigs/{name}/config.json.
 type RigConfig struct {
 	RepoPath      string `json:"repo_path"`

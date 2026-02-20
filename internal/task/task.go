@@ -213,7 +213,7 @@ func (s *Store) List(f Filter) ([]*Task, error) {
 		id := strings.TrimSuffix(e.Name(), ".json")
 		t, err := s.Get(id)
 		if err != nil {
-			return nil, err
+			continue // skip corrupt files
 		}
 		if matchesFilter(t, f) {
 			tasks = append(tasks, t)

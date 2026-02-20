@@ -518,6 +518,30 @@ func TestFullLifecycle(t *testing.T) {
 	}
 }
 
+func TestList_CorruptFileSkipped(t *testing.T) {
+	s := tempStore(t)
+
+	// Create a valid task.
+	s.Create(&Task{ID: "t-aaaaaa", Title: "Valid"})
+
+	// Write a corrupt task file.
+	corruptPath := filepath.Join(s.tasksDir(), "t-corrupt.json")
+	if err := os.WriteFile(corruptPath, []byte("{invalid json"), 0o644); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	tasks, err := s.List(Filter{})
+	if err != nil {
+		t.Fatalf("List: unexpected error: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Errorf("expected 1 task (skipping corrupt), got %d", len(tasks))
+	}
+	if tasks[0].ID != "t-aaaaaa" {
+		t.Errorf("expected task t-aaaaaa, got %s", tasks[0].ID)
+	}
+}
+
 func readyIDs(tasks []*Task) []string {
 	ids := make([]string, len(tasks))
 	for i, t := range tasks {
