@@ -2,8 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 
 	"github.com/anthropics/altera/internal/daemon"
 	"github.com/anthropics/altera/internal/liaison"
@@ -19,8 +17,8 @@ func init() {
 
 var startCmd = &cobra.Command{
 	Use:   "start",
-	Short: "Start daemon and liaison, then attach",
-	Long:  `Starts the daemon in a tmux session, starts the liaison, then attaches to the liaison session.`,
+	Short: "Start daemon and liaison",
+	Long:  `Starts the daemon in a tmux session and starts the liaison.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {
@@ -48,7 +46,7 @@ var startCmd = &cobra.Command{
 			if err := tmux.SendKeys(daemonSessionName, daemonCmd); err != nil {
 				return fmt.Errorf("starting daemon: %w", err)
 			}
-			fmt.Println("Daemon starting in tmux session: alt-daemon")
+			fmt.Println("Daemon started.")
 		}
 
 		// Start liaison if not already running.
@@ -62,15 +60,11 @@ var startCmd = &cobra.Command{
 			if err := m.StartLiaison(); err != nil {
 				return fmt.Errorf("starting liaison: %w", err)
 			}
-			fmt.Println("Liaison started in tmux session: alt-liaison")
+			fmt.Println("Liaison started.")
 		}
 
-		// Attach to liaison session with full TTY access.
-		fmt.Println("Attaching to liaison...")
-		attach := exec.Command("tmux", "attach-session", "-t", liaison.SessionName)
-		attach.Stdin = os.Stdin
-		attach.Stdout = os.Stdout
-		attach.Stderr = os.Stderr
-		return attach.Run()
+		fmt.Println("\nAltera running. Attach to liaison with:")
+		fmt.Println("  alt liaison attach")
+		return nil
 	},
 }
