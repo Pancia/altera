@@ -518,8 +518,8 @@ func (d *Daemon) assignTasks(tickEvents *[]events.Event) {
 }
 
 // spawnWorker creates a new worker agent for the given task. It creates a
-// git branch and worktree, a tmux session, assigns the task, and registers
-// the agent.
+// git branch and worktree, writes task.json / CLAUDE.md / .claude/settings.json,
+// starts Claude Code in a tmux session, assigns the task, and registers the agent.
 func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	agentID, err := generateAgentID()
 	if err != nil {
@@ -545,12 +545,42 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		return "", fmt.Errorf("create worktree: %w", err)
 	}
 
-	// Create tmux session.
-	if err := tmux.CreateSession(sessionName); err != nil {
-		// Clean up worktree and branch on failure.
+	// Helper to clean up git resources on failure.
+	cleanupGit := func() {
 		git.DeleteWorktree(d.rootDir, worktreePath)
 		git.DeleteBranch(d.rootDir, branchName)
+	}
+
+	// Write task.json to worktree root.
+	if err := writeWorkerTaskJSON(worktreePath, t); err != nil {
+		cleanupGit()
+		return "", fmt.Errorf("write task.json: %w", err)
+	}
+
+	// Write CLAUDE.md with worker system prompt.
+	if err := writeWorkerClaudeMD(worktreePath, t, agentID); err != nil {
+		cleanupGit()
+		return "", fmt.Errorf("write CLAUDE.md: %w", err)
+	}
+
+	// Write .claude/settings.json with heartbeat hooks.
+	if err := writeWorkerClaudeSettings(worktreePath, agentID); err != nil {
+		cleanupGit()
+		return "", fmt.Errorf("write .claude/settings.json: %w", err)
+	}
+
+	// Create tmux session.
+	if err := tmux.CreateSession(sessionName); err != nil {
+		cleanupGit()
 		return "", fmt.Errorf("create tmux session: %w", err)
+	}
+
+	// Start Claude Code in the tmux session.
+	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", worktreePath)
+	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
+		tmux.KillSession(sessionName)
+		cleanupGit()
+		return "", fmt.Errorf("start claude in worker: %w", err)
 	}
 
 	// Register the agent.
@@ -566,8 +596,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	}
 	if err := d.agents.Create(a); err != nil {
 		tmux.KillSession(sessionName)
-		git.DeleteWorktree(d.rootDir, worktreePath)
-		git.DeleteBranch(d.rootDir, branchName)
+		cleanupGit()
 		return "", fmt.Errorf("register agent: %w", err)
 	}
 
@@ -580,8 +609,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	}); err != nil {
 		d.agents.Delete(agentID)
 		tmux.KillSession(sessionName)
-		git.DeleteWorktree(d.rootDir, worktreePath)
-		git.DeleteBranch(d.rootDir, branchName)
+		cleanupGit()
 		return "", fmt.Errorf("assign task: %w", err)
 	}
 
@@ -1118,6 +1146,96 @@ func trimSpace(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// --- Worker file generation ---
+
+// writeWorkerTaskJSON writes task details as JSON to {worktree}/task.json.
+func writeWorkerTaskJSON(worktreePath string, t *task.Task) error {
+	data, err := json.MarshalIndent(t, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal task: %w", err)
+	}
+	data = append(data, '\n')
+	return os.WriteFile(filepath.Join(worktreePath, "task.json"), data, 0o644)
+}
+
+// writeWorkerClaudeMD writes CLAUDE.md with the worker system prompt.
+func writeWorkerClaudeMD(worktreePath string, t *task.Task, agentID string) error {
+	prompt := fmt.Sprintf(`# Worker Agent: %s
+
+You are a worker agent in the Altera multi-agent system.
+
+## Your Assignment
+
+- **Task ID**: %s
+- **Title**: %s
+
+## Task Description
+
+%s
+
+## Instructions
+
+1. Read task.json in your worktree root for full task details
+2. Implement the required changes
+3. Run tests to verify your work: go test ./...
+4. Commit your changes with a clear message referencing the task ID
+5. When done, run: alt task-done %s %s
+
+## Important
+
+- Stay focused on your assigned task
+- Commit early and often
+- Do not modify files outside your task scope
+- When finished, you MUST run the alt task-done command above
+`, agentID, t.ID, t.Title, t.Description, t.ID, agentID)
+
+	return os.WriteFile(filepath.Join(worktreePath, "CLAUDE.md"), []byte(prompt), 0o644)
+}
+
+// writeWorkerClaudeSettings writes .claude/settings.json with heartbeat hooks.
+func writeWorkerClaudeSettings(worktreePath, agentID string) error {
+	claudeDir := filepath.Join(worktreePath, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return fmt.Errorf("create .claude dir: %w", err)
+	}
+
+	type hookCmd struct {
+		Type    string `json:"type"`
+		Command string `json:"command"`
+	}
+	type hookGroup struct {
+		Matcher string    `json:"matcher"`
+		Hooks   []hookCmd `json:"hooks"`
+	}
+	type claudeSettings struct {
+		Hooks map[string][]hookGroup `json:"hooks"`
+	}
+
+	settings := claudeSettings{
+		Hooks: map[string][]hookGroup{
+			"PreToolUse": {
+				{
+					Matcher: "",
+					Hooks:   []hookCmd{{Type: "command", Command: fmt.Sprintf("alt heartbeat %s", agentID)}},
+				},
+			},
+			"Stop": {
+				{
+					Matcher: "",
+					Hooks:   []hookCmd{{Type: "command", Command: fmt.Sprintf("alt checkpoint %s", agentID)}},
+				},
+			},
+		},
+	}
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal settings: %w", err)
+	}
+	data = append(data, '\n')
+	return os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0o644)
 }
 
 // atomicWrite writes data to path via temp file + rename.

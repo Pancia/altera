@@ -276,12 +276,18 @@ func writeTaskJSON(worktreePath string, t *task.Task) error {
 
 // ClaudeSettings represents the .claude/settings.json structure.
 type ClaudeSettings struct {
-	Hooks map[string][]HookEntry `json:"hooks"`
+	Hooks map[string][]HookGroup `json:"hooks"`
 }
 
-// HookEntry represents a single hook in Claude settings.
-type HookEntry struct {
-	Matcher string `json:"matcher"`
+// HookGroup represents a matcher + hooks pair in Claude settings.
+type HookGroup struct {
+	Matcher string    `json:"matcher"`
+	Hooks   []HookCmd `json:"hooks"`
+}
+
+// HookCmd represents a single hook command.
+type HookCmd struct {
+	Type    string `json:"type"`
 	Command string `json:"command"`
 }
 
@@ -294,17 +300,17 @@ func writeClaudeSettings(worktreePath, agentID string) error {
 	}
 
 	settings := ClaudeSettings{
-		Hooks: map[string][]HookEntry{
+		Hooks: map[string][]HookGroup{
 			"PreToolUse": {
 				{
 					Matcher: "",
-					Command: fmt.Sprintf("alt heartbeat %s", agentID),
+					Hooks:   []HookCmd{{Type: "command", Command: fmt.Sprintf("alt heartbeat %s", agentID)}},
 				},
 			},
 			"Stop": {
 				{
 					Matcher: "",
-					Command: fmt.Sprintf("alt checkpoint %s", agentID),
+					Hooks:   []HookCmd{{Type: "command", Command: fmt.Sprintf("alt checkpoint %s", agentID)}},
 				},
 			},
 		},

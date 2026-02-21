@@ -265,16 +265,22 @@ func TestWriteClaudeSettings(t *testing.T) {
 	if !ok || len(pre) == 0 {
 		t.Fatal("missing PreToolUse hook")
 	}
-	if pre[0].Command != "alt heartbeat resolver-01" {
-		t.Errorf("PreToolUse command = %q, want %q", pre[0].Command, "alt heartbeat resolver-01")
+	if len(pre[0].Hooks) == 0 {
+		t.Fatal("PreToolUse hook group has no hooks")
+	}
+	if pre[0].Hooks[0].Command != "alt heartbeat resolver-01" {
+		t.Errorf("PreToolUse command = %q, want %q", pre[0].Hooks[0].Command, "alt heartbeat resolver-01")
 	}
 
 	stop, ok := settings.Hooks["Stop"]
 	if !ok || len(stop) == 0 {
 		t.Fatal("missing Stop hook")
 	}
-	if stop[0].Command != "alt checkpoint resolver-01" {
-		t.Errorf("Stop command = %q, want %q", stop[0].Command, "alt checkpoint resolver-01")
+	if len(stop[0].Hooks) == 0 {
+		t.Fatal("Stop hook group has no hooks")
+	}
+	if stop[0].Hooks[0].Command != "alt checkpoint resolver-01" {
+		t.Errorf("Stop command = %q, want %q", stop[0].Hooks[0].Command, "alt checkpoint resolver-01")
 	}
 }
 
