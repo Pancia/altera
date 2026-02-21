@@ -291,6 +291,14 @@ func (d *Daemon) tick() {
 	d.logger.Info("tick start", "tick", d.tickNum)
 	start := time.Now()
 
+	// Reload config from disk so runtime changes (e.g. max_workers) take effect.
+	if cfg, err := config.Load(d.altDir); err == nil {
+		d.cfg = cfg
+		d.checker.UpdateConstraints(cfg.Constraints)
+	} else {
+		d.logger.Error("tick: reload config", "error", err)
+	}
+
 	var tickEvents []events.Event
 
 	d.checkAgentLiveness(&tickEvents)

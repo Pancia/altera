@@ -32,6 +32,12 @@ func NewChecker(cfg config.Constraints, agents *agent.Store, evReader *events.Re
 	}
 }
 
+// UpdateConstraints replaces the constraint configuration. This allows
+// the daemon to pick up config changes without restarting.
+func (c *Checker) UpdateConstraints(cfg config.Constraints) {
+	c.cfg = cfg
+}
+
 // BudgetUsed sums the "token_cost" field from all events in the log.
 // Events without a token_cost data field are skipped.
 func (c *Checker) BudgetUsed() (float64, error) {
