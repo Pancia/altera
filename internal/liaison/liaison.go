@@ -186,12 +186,21 @@ func (m *Manager) CheckMessages() (string, error) {
 
 // ClaudeSettings represents the .claude/settings.json structure.
 type ClaudeSettings struct {
-	Hooks map[string][]HookEntry `json:"hooks"`
+	Hooks map[string][]HookGroup `json:"hooks"`
 }
 
-// HookEntry represents a single hook in Claude settings.
-type HookEntry struct {
-	Matcher string `json:"matcher"`
+// HookGroup represents a matcher + hooks pair in Claude settings.
+type HookGroup struct {
+	Matcher HookMatcher `json:"matcher"`
+	Hooks   []HookCmd   `json:"hooks"`
+}
+
+// HookMatcher specifies which events to match.
+type HookMatcher struct{}
+
+// HookCmd represents a single hook command.
+type HookCmd struct {
+	Type    string `json:"type"`
 	Command string `json:"command"`
 }
 
@@ -203,23 +212,23 @@ func (m *Manager) writeClaudeSettings() error {
 	}
 
 	settings := ClaudeSettings{
-		Hooks: map[string][]HookEntry{
+		Hooks: map[string][]HookGroup{
 			"SessionStart": {
 				{
-					Matcher: "",
-					Command: "alt liaison prime",
+					Matcher: HookMatcher{},
+					Hooks:   []HookCmd{{Type: "command", Command: "alt liaison prime"}},
 				},
 			},
 			"UserPromptSubmit": {
 				{
-					Matcher: "",
-					Command: "alt liaison check-messages",
+					Matcher: HookMatcher{},
+					Hooks:   []HookCmd{{Type: "command", Command: "alt liaison check-messages"}},
 				},
 			},
 			"PreCompact": {
 				{
-					Matcher: "",
-					Command: "alt liaison prime",
+					Matcher: HookMatcher{},
+					Hooks:   []HookCmd{{Type: "command", Command: "alt liaison prime"}},
 				},
 			},
 		},
