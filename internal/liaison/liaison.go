@@ -191,12 +191,9 @@ type ClaudeSettings struct {
 
 // HookGroup represents a matcher + hooks pair in Claude settings.
 type HookGroup struct {
-	Matcher HookMatcher `json:"matcher"`
-	Hooks   []HookCmd   `json:"hooks"`
+	Matcher string    `json:"matcher"`
+	Hooks   []HookCmd `json:"hooks"`
 }
-
-// HookMatcher specifies which events to match.
-type HookMatcher struct{}
 
 // HookCmd represents a single hook command.
 type HookCmd struct {
@@ -215,19 +212,19 @@ func (m *Manager) writeClaudeSettings() error {
 		Hooks: map[string][]HookGroup{
 			"SessionStart": {
 				{
-					Matcher: HookMatcher{},
+					Matcher: "",
 					Hooks:   []HookCmd{{Type: "command", Command: "alt liaison prime"}},
 				},
 			},
 			"UserPromptSubmit": {
 				{
-					Matcher: HookMatcher{},
+					Matcher: "",
 					Hooks:   []HookCmd{{Type: "command", Command: "alt liaison check-messages"}},
 				},
 			},
 			"PreCompact": {
 				{
-					Matcher: HookMatcher{},
+					Matcher: "",
 					Hooks:   []HookCmd{{Type: "command", Command: "alt liaison prime"}},
 				},
 			},
