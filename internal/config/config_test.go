@@ -270,7 +270,12 @@ func TestAtomicWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if filepath.Ext(e.Name()) == "" && e.Name() != "config.json" && e.Name() != "rigs" {
+		// Skip directories created by EnsureDir and the config file.
+		if e.IsDir() || e.Name() == "config.json" {
+			continue
+		}
+		// Any non-directory file without an extension that isn't config.json is suspicious.
+		if filepath.Ext(e.Name()) == "" {
 			t.Fatalf("unexpected file left behind: %s", e.Name())
 		}
 	}

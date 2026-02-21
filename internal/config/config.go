@@ -89,7 +89,13 @@ func EnsureDir(parentDir string) (string, error) {
 	altDir := filepath.Join(parentDir, DirName)
 	dirs := []string{
 		altDir,
+		filepath.Join(altDir, "agents"),
+		filepath.Join(altDir, "tasks"),
+		filepath.Join(altDir, "messages"),
+		filepath.Join(altDir, "messages", "archive"),
+		filepath.Join(altDir, "merge-queue"),
 		filepath.Join(altDir, "rigs"),
+		filepath.Join(altDir, "worktrees"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
