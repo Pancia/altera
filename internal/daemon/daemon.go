@@ -575,8 +575,14 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		return "", fmt.Errorf("create tmux session: %w", err)
 	}
 
-	// Start Claude Code in the tmux session.
-	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", worktreePath)
+	// Start Claude Code in the tmux session with the task as the initial prompt.
+	// The positional argument starts an interactive session with that first message,
+	// so Claude begins working immediately instead of sitting idle.
+	initialPrompt := fmt.Sprintf(
+		"Read CLAUDE.md and task.json, then implement the task. When finished, run: alt task-done %s %s",
+		t.ID, agentID,
+	)
+	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions %q", worktreePath, initialPrompt)
 	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
 		tmux.KillSession(sessionName)
 		cleanupGit()

@@ -156,7 +156,9 @@ func (s *Store) TouchHeartbeat(id string) error {
 }
 
 // HeartbeatTimeout is the duration after which a heartbeat is considered stale.
-var HeartbeatTimeout = 30 * time.Second
+// Set generous to allow for Claude Code startup time (~15-30s) plus the
+// daemon tick interval (60s).
+var HeartbeatTimeout = 3 * time.Minute
 
 // CheckLiveness returns true if the agent's heartbeat is fresh and its
 // OS process still exists (verified via signal 0).

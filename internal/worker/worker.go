@@ -156,7 +156,11 @@ func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error
 		return nil, fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", worktreePath)
+	initialPrompt := fmt.Sprintf(
+		"Read CLAUDE.md and task.json, then implement the task. When finished, run: alt task-done %s %s",
+		t.ID, id,
+	)
+	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions %q", worktreePath, initialPrompt)
 	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
 		_ = tmux.KillSession(sessionName)
 		cleanup()
