@@ -60,6 +60,7 @@ func TestSubcommandRegistration(t *testing.T) {
 	expected := []string{
 		"status", "task", "log", "rig", "work",
 		"daemon", "heartbeat", "checkpoint", "liaison",
+		"worker", "session", "prime", "setup",
 	}
 	cmds := rootCmd.Commands()
 	names := make(map[string]bool)
@@ -373,4 +374,97 @@ func TestTaskCreateFlags(t *testing.T) {
 		}
 	}
 	t.Fatal("task create command not found")
+}
+
+func TestWorkerSubcommands(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "worker" {
+			expected := []string{"list", "attach", "peek", "kill", "inspect"}
+			subs := c.Commands()
+			names := make(map[string]bool)
+			for _, s := range subs {
+				names[s.Name()] = true
+			}
+			for _, name := range expected {
+				if !names[name] {
+					t.Errorf("expected worker subcommand %q not found", name)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("worker command not found")
+}
+
+func TestSessionSubcommands(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "session" {
+			expected := []string{"list", "switch"}
+			subs := c.Commands()
+			names := make(map[string]bool)
+			for _, s := range subs {
+				names[s.Name()] = true
+			}
+			for _, name := range expected {
+				if !names[name] {
+					t.Errorf("expected session subcommand %q not found", name)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("session command not found")
+}
+
+func TestPrimeCommand(t *testing.T) {
+	found := false
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "prime" {
+			found = true
+			// Verify flags exist.
+			for _, flag := range []string{"role", "agent-id"} {
+				f := c.Flags().Lookup(flag)
+				if f == nil {
+					t.Errorf("prime missing --%s flag", flag)
+				}
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("prime command not found")
+	}
+}
+
+func TestSetupSubcommands(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "setup" {
+			expected := []string{"fish"}
+			subs := c.Commands()
+			names := make(map[string]bool)
+			for _, s := range subs {
+				names[s.Name()] = true
+			}
+			for _, name := range expected {
+				if !names[name] {
+					t.Errorf("expected setup subcommand %q not found", name)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("setup command not found")
+}
+
+func TestLogTailFlag(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "log" {
+			f := c.Flags().Lookup("tail")
+			if f == nil {
+				t.Error("log missing --tail flag")
+			}
+			return
+		}
+	}
+	t.Fatal("log command not found")
 }

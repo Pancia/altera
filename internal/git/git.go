@@ -246,6 +246,29 @@ func Log(path string, n int) (string, error) {
 	return out, nil
 }
 
+// ListBranches returns local branch names that start with prefix.
+// If prefix is empty, all branches are returned.
+func ListBranches(repo, prefix string) ([]string, error) {
+	out, err := run(repo, "branch", "--format=%(refname:short)")
+	if err != nil {
+		return nil, fmt.Errorf("listing branches: %w", err)
+	}
+	if out == "" {
+		return nil, nil
+	}
+	var branches []string
+	for _, b := range strings.Split(out, "\n") {
+		b = strings.TrimSpace(b)
+		if b == "" {
+			continue
+		}
+		if prefix == "" || strings.HasPrefix(b, prefix) {
+			branches = append(branches, b)
+		}
+	}
+	return branches, nil
+}
+
 // Rev returns the full commit hash of the given revision.
 func Rev(path, rev string) (string, error) {
 	out, err := run(path, "rev-parse", rev)

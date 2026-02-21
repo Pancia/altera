@@ -213,7 +213,7 @@ func (m *Manager) writeClaudeSettings() error {
 			"SessionStart": {
 				{
 					Matcher: "",
-					Hooks:   []HookCmd{{Type: "command", Command: "alt liaison prime"}},
+					Hooks:   []HookCmd{{Type: "command", Command: "alt prime"}},
 				},
 			},
 			"UserPromptSubmit": {
@@ -225,7 +225,7 @@ func (m *Manager) writeClaudeSettings() error {
 			"PreCompact": {
 				{
 					Matcher: "",
-					Hooks:   []HookCmd{{Type: "command", Command: "alt liaison prime"}},
+					Hooks:   []HookCmd{{Type: "command", Command: "alt prime"}},
 				},
 			},
 		},

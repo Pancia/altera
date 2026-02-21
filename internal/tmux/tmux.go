@@ -25,6 +25,9 @@ func CreateSession(name string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux new-session %q: %s: %w", name, strings.TrimSpace(string(out)), err)
 	}
+	// Enable mouse mode for scrolling in this session only.
+	mouseCmd := exec.Command("tmux", "set-option", "-t", name, "mouse", "on")
+	_ = mouseCmd.Run()
 	return nil
 }
 
