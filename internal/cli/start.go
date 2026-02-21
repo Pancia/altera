@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 
 	"github.com/anthropics/altera/internal/daemon"
 	"github.com/anthropics/altera/internal/liaison"
@@ -66,12 +65,12 @@ var startCmd = &cobra.Command{
 			fmt.Println("Liaison started in tmux session: alt-liaison")
 		}
 
-		// Attach to liaison session (replaces this process).
+		// Attach to liaison session with full TTY access.
 		fmt.Println("Attaching to liaison...")
-		tmuxPath, err := exec.LookPath("tmux")
-		if err != nil {
-			return fmt.Errorf("tmux not found: %w", err)
-		}
-		return syscall.Exec(tmuxPath, []string{"tmux", "attach-session", "-t", liaison.SessionName}, os.Environ())
+		attach := exec.Command("tmux", "attach-session", "-t", liaison.SessionName)
+		attach.Stdin = os.Stdin
+		attach.Stdout = os.Stdout
+		attach.Stderr = os.Stderr
+		return attach.Run()
 	},
 }
