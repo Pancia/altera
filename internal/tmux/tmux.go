@@ -5,6 +5,7 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -43,16 +44,19 @@ func SessionExists(name string) bool {
 }
 
 // AttachSession attaches the terminal to the given tmux session.
-// This replaces the current process for interactive use.
+// Stdin, stdout, and stderr are connected to the current terminal for
+// interactive use.
 func AttachSession(name string) error {
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
 		return fmt.Errorf("tmux not found: %w", err)
 	}
 	cmd := exec.Command(tmuxPath, "attach-session", "-t", name)
-	cmd.Stdin = nil // will be connected by caller for interactive use
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("tmux attach-session %q: %s: %w", name, strings.TrimSpace(string(out)), err)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("tmux attach-session %q: %w", name, err)
 	}
 	return nil
 }

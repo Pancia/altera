@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 
+	"github.com/anthropics/altera/internal/agent"
 	"github.com/anthropics/altera/internal/daemon"
 	"github.com/anthropics/altera/internal/liaison"
 	"github.com/anthropics/altera/internal/tmux"
@@ -35,12 +37,20 @@ var stopCmd = &cobra.Command{
 			fmt.Println("Daemon is not running.")
 		}
 
-		// Kill liaison tmux session.
+		// Kill liaison tmux session and mark agent as dead.
 		if tmux.SessionExists(liaison.SessionName) {
 			if err := tmux.KillSession(liaison.SessionName); err != nil {
 				fmt.Printf("Warning: failed to kill liaison session: %v\n", err)
 			} else {
 				fmt.Println("Liaison session killed.")
+			}
+		}
+		// Mark liaison agent as dead in the store.
+		agents, err := agent.NewStore(filepath.Join(altDir, "agents"))
+		if err == nil {
+			if a, err := agents.Get(liaison.AgentID); err == nil {
+				a.Status = agent.StatusDead
+				_ = agents.Update(a)
 			}
 		}
 
