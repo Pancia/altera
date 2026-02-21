@@ -196,6 +196,10 @@ func (d *Daemon) reconcileAgents() {
 		return
 	}
 	for _, a := range active {
+		// Skip liaison — it has no PID and is managed interactively.
+		if a.Role == agent.RoleLiaison {
+			continue
+		}
 		if agent.CheckLiveness(a) {
 			continue
 		}
@@ -313,6 +317,10 @@ func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 	}
 
 	for _, a := range active {
+		// Skip liaison — it has no PID and is managed interactively.
+		if a.Role == agent.RoleLiaison {
+			continue
+		}
 		if agent.CheckLiveness(a) {
 			continue
 		}
