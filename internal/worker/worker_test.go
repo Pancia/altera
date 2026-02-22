@@ -201,7 +201,8 @@ func TestWriteClaudeSettings(t *testing.T) {
 	dir := t.TempDir()
 	agentID := "worker-01"
 
-	if err := writeClaudeSettings(dir, agentID); err != nil {
+	taskID := "t-abc123"
+	if err := writeClaudeSettings(dir, agentID, taskID); err != nil {
 		t.Fatalf("writeClaudeSettings: %v", err)
 	}
 
@@ -235,8 +236,8 @@ func TestWriteClaudeSettings(t *testing.T) {
 	if len(stop[0].Hooks) == 0 {
 		t.Fatal("Stop hook group has no hooks")
 	}
-	if stop[0].Hooks[0].Command != "alt checkpoint worker-01" {
-		t.Errorf("Stop command = %q, want %q", stop[0].Hooks[0].Command, "alt checkpoint worker-01")
+	if stop[0].Hooks[0].Command != "alt checkpoint t-abc123" {
+		t.Errorf("Stop command = %q, want %q", stop[0].Hooks[0].Command, "alt checkpoint t-abc123")
 	}
 }
 

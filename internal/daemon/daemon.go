@@ -62,15 +62,38 @@ type Daemon struct {
 	shutdown chan struct{} // closed to signal shutdown
 	tickNow  chan struct{} // buffered(1), receives SIGUSR1 forced ticks
 
+	tickInterval      time.Duration // configurable tick interval (default TickInterval)
+	workerCmdTemplate string        // custom worker command (empty = use Claude Code)
+
 	// State tracking for observability (written to daemon-state.json each tick).
 	lastSpawnTask  string
 	lastSpawnError string
 	recentErrors   []string // capped at 10
 }
 
+// Option configures a Daemon.
+type Option func(*Daemon)
+
+// WithTickInterval sets the tick interval for the daemon loop.
+func WithTickInterval(interval time.Duration) Option {
+	return func(d *Daemon) {
+		d.tickInterval = interval
+	}
+}
+
+// WithWorkerCommand sets a custom worker command. When set, workers run
+// this command instead of Claude Code. The command runs in the worktree
+// with ALT_AGENT_ID set in the environment. The command should NOT use
+// exec so that the shell stays alive as the pane process.
+func WithWorkerCommand(cmd string) Option {
+	return func(d *Daemon) {
+		d.workerCmdTemplate = cmd
+	}
+}
+
 // New creates a Daemon rooted at the given project directory. The .alt/
 // directory must already exist. Call Run to start the tick loop.
-func New(rootDir string) (*Daemon, error) {
+func New(rootDir string, opts ...Option) (*Daemon, error) {
 	altDir := filepath.Join(rootDir, config.DirName)
 	if _, err := os.Stat(altDir); os.IsNotExist(err) {
 		return nil, fmt.Errorf("daemon: %s directory not found in %s", config.DirName, rootDir)
@@ -115,22 +138,27 @@ func New(rootDir string) (*Daemon, error) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil)).With("component", "daemon")
 
-	return &Daemon{
-		altDir:      altDir,
-		rootDir:     rootDir,
-		cfg:         cfg,
-		agents:      agentStore,
-		tasks:       taskStore,
-		messages:    msgStore,
-		events:      evWriter,
-		evReader:    evReader,
-		checker:     checker,
-		resolverMgr: resolverMgr,
-		pidFile:     filepath.Join(altDir, "daemon.pid"),
-		logger:      logger,
-		shutdown:    make(chan struct{}),
-		tickNow:     make(chan struct{}, 1),
-	}, nil
+	d := &Daemon{
+		altDir:       altDir,
+		rootDir:      rootDir,
+		cfg:          cfg,
+		agents:       agentStore,
+		tasks:        taskStore,
+		messages:     msgStore,
+		events:       evWriter,
+		evReader:     evReader,
+		checker:      checker,
+		resolverMgr:  resolverMgr,
+		pidFile:      filepath.Join(altDir, "daemon.pid"),
+		logger:       logger,
+		shutdown:     make(chan struct{}),
+		tickNow:      make(chan struct{}, 1),
+		tickInterval: TickInterval,
+	}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d, nil
 }
 
 // Run starts the daemon tick loop. It acquires a PID file lock, installs
@@ -156,7 +184,7 @@ func (d *Daemon) Run() error {
 	// Run one tick immediately, then loop on the interval.
 	d.tick()
 
-	ticker := time.NewTicker(TickInterval)
+	ticker := time.NewTicker(d.tickInterval)
 	defer ticker.Stop()
 
 	for {
@@ -177,7 +205,7 @@ func (d *Daemon) Run() error {
 				Type:      events.DaemonTickForced,
 			})
 			d.tick()
-			ticker.Reset(TickInterval)
+			ticker.Reset(d.tickInterval)
 		}
 	}
 }
@@ -729,7 +757,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	}
 
 	// Write .claude/settings.json with heartbeat hooks.
-	if err := writeWorkerClaudeSettings(worktreePath, agentID); err != nil {
+	if err := writeWorkerClaudeSettings(worktreePath, agentID, t.ID); err != nil {
 		cleanupGit()
 		return "", fmt.Errorf("write .claude/settings.json: %w", err)
 	}
@@ -740,18 +768,24 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		return "", fmt.Errorf("create tmux session: %w", err)
 	}
 
-	// Start Claude Code in the tmux session with the task as the initial prompt.
-	// The positional argument starts an interactive session with that first message,
-	// so Claude begins working immediately instead of sitting idle.
-	initialPrompt := fmt.Sprintf(
-		"Read task.json, then run alt help worker startup for full instructions. When finished, run: alt task-done %s %s",
-		t.ID, agentID,
-	)
-	claudeCmd := fmt.Sprintf("cd %s && unset CLAUDECODE && export ALT_AGENT_ID=%s && exec claude --dangerously-skip-permissions %q", worktreePath, agentID, initialPrompt)
-	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
+	// Start the worker process in the tmux session.
+	var workerCmd string
+	if d.workerCmdTemplate != "" {
+		// Custom worker command (e.g. mock script for integration tests).
+		// No exec: shell stays alive as the pane process.
+		workerCmd = fmt.Sprintf("cd %s && export ALT_AGENT_ID=%s && %s && exit 0", worktreePath, agentID, d.workerCmdTemplate)
+	} else {
+		// Claude Code: exec replaces the shell so pane PID = claude PID.
+		initialPrompt := fmt.Sprintf(
+			"Read task.json, then run alt help worker startup for full instructions. When finished, run: alt task-done %s %s",
+			t.ID, agentID,
+		)
+		workerCmd = fmt.Sprintf("cd %s && unset CLAUDECODE && export ALT_AGENT_ID=%s && exec claude --dangerously-skip-permissions %q", worktreePath, agentID, initialPrompt)
+	}
+	if err := tmux.SendKeys(sessionName, workerCmd); err != nil {
 		_ = tmux.KillSession(sessionName)
 		cleanupGit()
-		return "", fmt.Errorf("start claude in worker: %w", err)
+		return "", fmt.Errorf("start worker in tmux: %w", err)
 	}
 
 	// Give the exec a moment to replace the shell process, then read the pane PID.
@@ -1501,7 +1535,7 @@ func writeWorkerTaskJSON(worktreePath string, t *task.Task) error {
 }
 
 // writeWorkerClaudeSettings writes .claude/settings.json with heartbeat hooks.
-func writeWorkerClaudeSettings(worktreePath, agentID string) error {
+func writeWorkerClaudeSettings(worktreePath, agentID, taskID string) error {
 	claudeDir := filepath.Join(worktreePath, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("create .claude dir: %w", err)
@@ -1530,7 +1564,7 @@ func writeWorkerClaudeSettings(worktreePath, agentID string) error {
 			"Stop": {
 				{
 					Matcher: "",
-					Hooks:   []hookCmd{{Type: "command", Command: fmt.Sprintf("alt checkpoint %s", agentID)}},
+					Hooks:   []hookCmd{{Type: "command", Command: fmt.Sprintf("alt checkpoint %s", taskID)}},
 				},
 			},
 		},

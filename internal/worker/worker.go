@@ -142,7 +142,7 @@ func (m *Manager) SpawnWorker(t *task.Task) (*agent.Agent, error) {
 	}
 
 	// 4. Generate .claude/settings.json with hooks.
-	if err := writeClaudeSettings(worktreePath, id); err != nil {
+	if err := writeClaudeSettings(worktreePath, id, t.ID); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("writing claude settings: %w", err)
 	}
@@ -341,8 +341,8 @@ type HookCmd struct {
 }
 
 // writeClaudeSettings creates .claude/settings.json with heartbeat and
-// checkpoint hooks for the given agent ID.
-func writeClaudeSettings(worktreePath, agentID string) error {
+// checkpoint hooks for the given agent and task IDs.
+func writeClaudeSettings(worktreePath, agentID, taskID string) error {
 	claudeDir := filepath.Join(worktreePath, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("creating .claude dir: %w", err)
@@ -365,7 +365,7 @@ func writeClaudeSettings(worktreePath, agentID string) error {
 			"Stop": {
 				{
 					Matcher: "",
-					Hooks:   []HookCmd{{Type: "command", Command: fmt.Sprintf("alt checkpoint %s", agentID)}},
+					Hooks:   []HookCmd{{Type: "command", Command: fmt.Sprintf("alt checkpoint %s", taskID)}},
 				},
 			},
 		},

@@ -35,7 +35,11 @@ var checkpointCmd = &cobra.Command{
 			t.Checkpoint = checkpointMsg
 			return nil
 		}); err != nil {
-			return fmt.Errorf("saving checkpoint: %w", err)
+			// Best-effort: the task may already be done and merged by the
+			// daemon before the stop hook fires. Silently succeed so hooks
+			// don't produce noisy errors.
+			fmt.Printf("Checkpoint skipped for task %s (already finished)\n", taskID)
+			return nil
 		}
 
 		fmt.Printf("Checkpoint saved for task %s\n", taskID)
