@@ -287,14 +287,14 @@ func TestHasConflictMarkers(t *testing.T) {
 
 	// File with conflict markers.
 	conflicted := filepath.Join(dir, "conflicted.txt")
-	os.WriteFile(conflicted, []byte("before\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\nafter\n"), 0o644)
+	_ = os.WriteFile(conflicted, []byte("before\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\nafter\n"), 0o644)
 	if !hasConflictMarkers(conflicted) {
 		t.Error("expected conflict markers in conflicted.txt")
 	}
 
 	// File without conflict markers.
 	clean := filepath.Join(dir, "clean.txt")
-	os.WriteFile(clean, []byte("just some normal content\n"), 0o644)
+	_ = os.WriteFile(clean, []byte("just some normal content\n"), 0o644)
 	if hasConflictMarkers(clean) {
 		t.Error("unexpected conflict markers in clean.txt")
 	}
@@ -317,7 +317,7 @@ func TestDetectResolution_WithMarkers(t *testing.T) {
 	}
 
 	// Write a file with conflict markers.
-	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n"), 0o644)
 
 	a := &agent.Agent{
 		ID:       "resolver-01",
@@ -346,7 +346,7 @@ func TestDetectResolution_CleanResolution(t *testing.T) {
 	if err := git.SetAuthor(dir, "test", "test@test.local"); err != nil {
 		t.Fatalf("set author: %v", err)
 	}
-	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("resolved content\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("resolved content\n"), 0o644)
 	if err := git.Add(dir, nil); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestDetectResolution_UncommittedChanges(t *testing.T) {
 		t.Fatalf("set author: %v", err)
 	}
 	// Initial commit.
-	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("initial\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("initial\n"), 0o644)
 	if err := git.Add(dir, nil); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestDetectResolution_UncommittedChanges(t *testing.T) {
 	}
 
 	// Modify without committing.
-	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("resolved content\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("resolved content\n"), 0o644)
 
 	a := &agent.Agent{
 		ID:       "resolver-01",
@@ -425,6 +425,7 @@ func TestSpawnResolver(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
 	}
+	tmux.UseTestSocket(t)
 
 	projectRoot, _, conflictBranch := setupProject(t)
 	m := newTestManager(t, projectRoot)
@@ -533,7 +534,7 @@ func TestSpawnResolver_NoConflict(t *testing.T) {
 	if err := git.Checkout(rigRepo, "clean-branch"); err != nil {
 		t.Fatalf("checkout: %v", err)
 	}
-	os.WriteFile(filepath.Join(rigRepo, "new-file.txt"), []byte("new content\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(rigRepo, "new-file.txt"), []byte("new content\n"), 0o644)
 	if err := git.Add(rigRepo, nil); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
@@ -561,7 +562,7 @@ func TestSpawnResolver_NoConflict(t *testing.T) {
 
 func TestSpawnResolver_NoConfig(t *testing.T) {
 	projectRoot := t.TempDir()
-	os.MkdirAll(filepath.Join(projectRoot, config.DirName, "agents"), 0o755)
+	_ = os.MkdirAll(filepath.Join(projectRoot, config.DirName, "agents"), 0o755)
 	m := newTestManager(t, projectRoot)
 
 	ctx := ConflictContext{
@@ -580,6 +581,7 @@ func TestCleanupResolver(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
 	}
+	tmux.UseTestSocket(t)
 
 	projectRoot, _, conflictBranch := setupProject(t)
 	m := newTestManager(t, projectRoot)

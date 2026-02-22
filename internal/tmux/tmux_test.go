@@ -20,12 +20,13 @@ func requireTmux(t *testing.T) {
 func testSession(t *testing.T) string {
 	t.Helper()
 	requireTmux(t)
+	UseTestSocket(t)
 	name := SessionPrefix + "test-" + t.Name()
 	// Sanitize: tmux session names can't contain dots or colons.
 	name = strings.NewReplacer(".", "_", ":", "_", "/", "_").Replace(name)
 	t.Cleanup(func() {
-		// Best-effort cleanup on the alt socket.
-		exec.Command("tmux", "-L", SocketName, "kill-session", "-t", name).Run()
+		// Best-effort cleanup on the test socket.
+		_ = exec.Command("tmux", "-L", socketName, "kill-session", "-t", name).Run()
 	})
 	return name
 }
@@ -73,6 +74,7 @@ func TestCreateDuplicateSession(t *testing.T) {
 
 func TestKillNonexistentSession(t *testing.T) {
 	requireTmux(t)
+	UseTestSocket(t)
 	err := KillSession("alt-test-nonexistent-xyz")
 	if err == nil {
 		t.Fatal("expected error killing nonexistent session")
@@ -81,6 +83,7 @@ func TestKillNonexistentSession(t *testing.T) {
 
 func TestSessionExistsNonexistent(t *testing.T) {
 	requireTmux(t)
+	UseTestSocket(t)
 	if SessionExists("alt-test-nonexistent-xyz") {
 		t.Fatal("nonexistent session should return false")
 	}
@@ -151,13 +154,14 @@ func TestListSessions(t *testing.T) {
 
 func TestListSessionsFiltersNonAlt(t *testing.T) {
 	requireTmux(t)
+	UseTestSocket(t)
 
-	// Create a non-alt session on the alt socket.
+	// Create a non-alt session on the test socket.
 	nonAlt := "noalt-test-" + t.Name()
 	nonAlt = strings.NewReplacer(".", "_", ":", "_", "/", "_").Replace(nonAlt)
-	exec.Command("tmux", "-L", SocketName, "new-session", "-d", "-s", nonAlt).Run()
+	_ = exec.Command("tmux", "-L", socketName, "new-session", "-d", "-s", nonAlt).Run()
 	t.Cleanup(func() {
-		exec.Command("tmux", "-L", SocketName, "kill-session", "-t", nonAlt).Run()
+		_ = exec.Command("tmux", "-L", socketName, "kill-session", "-t", nonAlt).Run()
 	})
 
 	sessions, err := ListSessions()
@@ -187,6 +191,7 @@ func TestWaitForSessionReady(t *testing.T) {
 
 func TestWaitForSessionReadyTimeout(t *testing.T) {
 	requireTmux(t)
+	UseTestSocket(t)
 
 	err := WaitForSessionReady("alt-test-never-exists-xyz", 300*time.Millisecond)
 	if err == nil {
@@ -199,6 +204,7 @@ func TestWaitForSessionReadyTimeout(t *testing.T) {
 
 func TestSendKeysNonexistent(t *testing.T) {
 	requireTmux(t)
+	UseTestSocket(t)
 	err := SendKeys("alt-test-nonexistent-xyz", "echo hi")
 	if err == nil {
 		t.Fatal("expected error sending keys to nonexistent session")
@@ -207,6 +213,7 @@ func TestSendKeysNonexistent(t *testing.T) {
 
 func TestCapturePaneNonexistent(t *testing.T) {
 	requireTmux(t)
+	UseTestSocket(t)
 	_, err := CapturePane("alt-test-nonexistent-xyz", 10)
 	if err == nil {
 		t.Fatal("expected error capturing from nonexistent session")

@@ -12,15 +12,21 @@ import (
 	"time"
 )
 
-// SocketName is the tmux server socket name used to isolate alt sessions.
-const SocketName = "alt"
+// socketName is the tmux server socket name used to isolate alt sessions.
+// Tests can override this via UseTestSocket.
+var socketName = "alt"
+
+// Socket returns the current tmux server socket name.
+func Socket() string {
+	return socketName
+}
 
 // SessionPrefix is prepended to all Altera-managed tmux session names.
 const SessionPrefix = "alt-"
 
 // socketArgs returns the args to select the alt tmux server socket.
 func socketArgs() []string {
-	return []string{"-L", SocketName}
+	return []string{"-L", socketName}
 }
 
 // SessionName builds a canonical session name from role and id.

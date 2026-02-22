@@ -16,6 +16,7 @@ import (
 	"github.com/anthropics/altera/internal/merge"
 	"github.com/anthropics/altera/internal/message"
 	"github.com/anthropics/altera/internal/task"
+	"github.com/anthropics/altera/internal/tmux"
 )
 
 // setupE2EProject creates a full project directory backed by a real git
@@ -23,6 +24,7 @@ import (
 // Returns the project root (which is also the git repo root).
 func setupE2EProject(t *testing.T) string {
 	t.Helper()
+	tmux.UseTestSocket(t)
 	root := t.TempDir()
 
 	// Initialize a real git repo at root.
@@ -651,7 +653,7 @@ func TestE2E_BudgetEnforcement(t *testing.T) {
 		},
 	}
 	data, _ := json.MarshalIndent(cfg, "", "  ")
-	os.WriteFile(filepath.Join(altDir, "config.json"), data, 0o644)
+	_ = os.WriteFile(filepath.Join(altDir, "config.json"), data, 0o644)
 
 	d, err := New(root)
 	if err != nil {
@@ -958,7 +960,7 @@ func TestE2E_MergeConflict_AttemptsResolverSpawn(t *testing.T) {
 		{"w-res01", "t-res01"},
 		{"w-res02", "t-res02"},
 	} {
-		d.messages.Create(message.TypeTaskDone, w.agent, "daemon", w.task, map[string]any{"result": "done"})
+		_, _ = d.messages.Create(message.TypeTaskDone, w.agent, "daemon", w.task, map[string]any{"result": "done"})
 	}
 
 	var tickEvents []events.Event
@@ -982,7 +984,7 @@ func TestE2E_MergeConflict_AttemptsResolverSpawn(t *testing.T) {
 	t.Cleanup(func() {
 		resolvers, _ := d.resolverMgr.ListResolvers()
 		for _, r := range resolvers {
-			d.resolverMgr.CleanupResolver(r)
+			_ = d.resolverMgr.CleanupResolver(r)
 		}
 	})
 
@@ -1037,8 +1039,8 @@ func TestE2E_MergeConflict_ExtractsConflictInfo(t *testing.T) {
 	})
 
 	// Signal both done and process messages.
-	d.messages.Create(message.TypeTaskDone, "w-ext01", "daemon", "t-ext01", map[string]any{"result": "done"})
-	d.messages.Create(message.TypeTaskDone, "w-ext02", "daemon", "t-ext02", map[string]any{"result": "done"})
+	_, _ = d.messages.Create(message.TypeTaskDone, "w-ext01", "daemon", "t-ext01", map[string]any{"result": "done"})
+	_, _ = d.messages.Create(message.TypeTaskDone, "w-ext02", "daemon", "t-ext02", map[string]any{"result": "done"})
 
 	var tickEvents []events.Event
 	d.processMessages(&tickEvents)
@@ -1220,7 +1222,7 @@ func TestE2E_CheckResolvers_SkipsUnresolved(t *testing.T) {
 			}},
 		},
 	}, "", "  ")
-	os.WriteFile(filepath.Join(resolverWorktree, "conflict-context.json"), ctxData, 0o644)
+	_ = os.WriteFile(filepath.Join(resolverWorktree, "conflict-context.json"), ctxData, 0o644)
 	gitCmd(t, resolverWorktree, "add", "conflict-context.json")
 	gitCmd(t, resolverWorktree, "commit", "-m", "add context")
 

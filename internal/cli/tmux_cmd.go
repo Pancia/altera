@@ -75,7 +75,7 @@ var tmuxClientCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("tmux not found: %w", err)
 		}
-		c := exec.Command(tmuxPath, "-L", tmux.SocketName)
+		c := exec.Command(tmuxPath, "-L", tmux.Socket())
 		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr

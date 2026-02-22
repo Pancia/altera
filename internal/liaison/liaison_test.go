@@ -158,7 +158,7 @@ func TestPrime_WithState(t *testing.T) {
 		"agent_id": "worker-02",
 	}
 	mqData, _ := json.MarshalIndent(mqItem, "", "  ")
-	os.WriteFile(filepath.Join(mqDir, "1234567890-t-def456.json"), mqData, 0o644)
+	_ = os.WriteFile(filepath.Join(mqDir, "1234567890-t-def456.json"), mqData, 0o644)
 
 	// Write some events.
 	evWriter := events.NewWriter(filepath.Join(altDir, "events.jsonl"))
@@ -239,6 +239,7 @@ func TestStartLiaison(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
 	}
+	tmux.UseTestSocket(t)
 
 	_, m := setupProject(t)
 
@@ -280,6 +281,7 @@ func TestStartLiaison_AlreadyExists(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
 	}
+	tmux.UseTestSocket(t)
 
 	_, m := setupProject(t)
 
@@ -304,6 +306,7 @@ func TestStartLiaison_ReactivatesDeadAgent(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
 	}
+	tmux.UseTestSocket(t)
 
 	_, m := setupProject(t)
 
@@ -337,6 +340,7 @@ func TestStartLiaison_ReactivatesDeadAgent(t *testing.T) {
 }
 
 func TestAttachLiaison_NoSession(t *testing.T) {
+	tmux.UseTestSocket(t)
 	// Make sure there's no session.
 	if tmux.SessionExists(SessionName) {
 		_ = tmux.KillSession(SessionName)

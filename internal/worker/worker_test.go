@@ -244,6 +244,7 @@ func TestSpawnWorker(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
 	}
+	tmux.UseTestSocket(t)
 
 	projectRoot, _ := setupProject(t)
 	m := newTestManager(t, projectRoot)
@@ -336,6 +337,7 @@ func TestSpawnWorker_SequentialNaming(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
 	}
+	tmux.UseTestSocket(t)
 
 	projectRoot, _ := setupProject(t)
 	m := newTestManager(t, projectRoot)
@@ -376,6 +378,7 @@ func TestCleanupWorker(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
 	}
+	tmux.UseTestSocket(t)
 
 	projectRoot, _ := setupProject(t)
 	m := newTestManager(t, projectRoot)
@@ -477,7 +480,7 @@ func TestListWorkers(t *testing.T) {
 
 func TestSpawnWorker_NoConfig(t *testing.T) {
 	projectRoot := t.TempDir()
-	os.MkdirAll(filepath.Join(projectRoot, config.DirName, "agents"), 0o755)
+	_ = os.MkdirAll(filepath.Join(projectRoot, config.DirName, "agents"), 0o755)
 	m := newTestManager(t, projectRoot)
 	tk := sampleTask()
 
