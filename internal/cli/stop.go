@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/anthropics/altera/internal/agent"
 	"github.com/anthropics/altera/internal/daemon"
@@ -51,6 +53,35 @@ var stopCmd = &cobra.Command{
 			if a, err := agents.Get(liaison.AgentID); err == nil {
 				a.Status = agent.StatusDead
 				_ = agents.Update(a)
+			}
+		}
+
+		// Kill worker and resolver agent sessions.
+		if agents != nil {
+			for _, status := range []agent.Status{agent.StatusActive, agent.StatusIdle} {
+				active, err := agents.ListByStatus(status)
+				if err != nil {
+					continue
+				}
+				for _, a := range active {
+					if a.Role == agent.RoleLiaison {
+						continue
+					}
+					if a.PID > 0 {
+						if proc, err := os.FindProcess(a.PID); err == nil {
+							_ = proc.Signal(syscall.SIGTERM)
+						}
+					}
+					if a.TmuxSession != "" && tmux.SessionExists(a.TmuxSession) {
+						if err := tmux.KillSession(a.TmuxSession); err != nil {
+							fmt.Printf("Warning: failed to kill session %s: %v\n", a.TmuxSession, err)
+						} else {
+							fmt.Printf("Killed %s session: %s\n", a.Role, a.TmuxSession)
+						}
+					}
+					a.Status = agent.StatusDead
+					_ = agents.Update(a)
+				}
 			}
 		}
 
