@@ -60,7 +60,7 @@ func (r *Reader) Read(filter Filter) ([]Event, error) {
 		}
 		return nil, fmt.Errorf("events: open: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var result []Event
 	scanner := bufio.NewScanner(f)

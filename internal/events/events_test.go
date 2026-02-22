@@ -85,7 +85,7 @@ func TestEventMarshalOmitsEmptyData(t *testing.T) {
 	}
 
 	var raw map[string]any
-	json.Unmarshal(data, &raw)
+	_ = json.Unmarshal(data, &raw)
 	if _, ok := raw["data"]; ok {
 		t.Errorf("Expected data field to be omitted when nil, got: %s", data)
 	}
@@ -106,7 +106,7 @@ func TestEventTimestampUTC(t *testing.T) {
 	}
 
 	var got Event
-	json.Unmarshal(data, &got)
+	_ = json.Unmarshal(data, &got)
 	if got.Timestamp.Location() != time.UTC {
 		t.Errorf("Expected UTC timestamp, got %v", got.Timestamp.Location())
 	}
@@ -519,7 +519,7 @@ func TestConcurrentAppendSafety(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	dec := json.NewDecoder(f)
 	count := 0
@@ -574,8 +574,8 @@ func TestReadCorruptLineSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	f.WriteString("{corrupt json line\n")
-	f.Close()
+	_, _ = f.WriteString("{corrupt json line\n")
+	_ = f.Close()
 
 	// Write another valid event.
 	mustWrite(t, w, testEvent(TaskDone, "a1", "t1"))

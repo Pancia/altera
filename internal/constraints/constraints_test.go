@@ -50,7 +50,7 @@ func makeMergeQueue(t *testing.T, n int) string {
 		if err != nil {
 			t.Fatalf("Create queue item: %v", err)
 		}
-		f.Close()
+		_ = f.Close()
 	}
 	return dir
 }
@@ -229,9 +229,9 @@ func TestQueueDepthCountsJSONFiles(t *testing.T) {
 func TestQueueDepthIgnoresNonJSON(t *testing.T) {
 	dir := makeMergeQueue(t, 3)
 	// Add a non-JSON file.
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("ignore"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "README.md"), []byte("ignore"), 0o644)
 	// Add a subdirectory.
-	os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
+	_ = os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
 
 	agents := makeAgentStore(t)
 	r := emptyReader(t)

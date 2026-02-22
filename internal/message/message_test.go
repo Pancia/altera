@@ -149,11 +149,11 @@ func TestDeleteNotFound(t *testing.T) {
 func TestListPending(t *testing.T) {
 	s := newTestStore(t)
 	// Create messages to different recipients.
-	s.Create(TypeTaskDone, "x", "alice", "", nil)
+	_, _ = s.Create(TypeTaskDone, "x", "alice", "", nil)
 	time.Sleep(time.Millisecond) // ensure distinct timestamps
-	s.Create(TypeHelp, "y", "bob", "", nil)
+	_, _ = s.Create(TypeHelp, "y", "bob", "", nil)
 	time.Sleep(time.Millisecond)
-	s.Create(TypeCheckpoint, "z", "alice", "", nil)
+	_, _ = s.Create(TypeCheckpoint, "z", "alice", "", nil)
 
 	msgs, err := s.ListPending("alice")
 	if err != nil {
@@ -193,7 +193,7 @@ func TestListPendingTimestampOrdering(t *testing.T) {
 	s := newTestStore(t)
 	// Create 5 messages with slight delays to get distinct timestamps.
 	for i := 0; i < 5; i++ {
-		s.Create(TypeCheckpoint, "sender", "recipient", "", map[string]any{"seq": float64(i)})
+		_, _ = s.Create(TypeCheckpoint, "sender", "recipient", "", map[string]any{"seq": float64(i)})
 		time.Sleep(time.Millisecond)
 	}
 
@@ -349,7 +349,7 @@ func TestCreateWithEmptyTaskID(t *testing.T) {
 func TestListPendingExcludesArchived(t *testing.T) {
 	s := newTestStore(t)
 	m1, _ := s.Create(TypeTaskDone, "a", "alice", "", nil)
-	s.Create(TypeHelp, "b", "alice", "", nil)
+	_, _ = s.Create(TypeHelp, "b", "alice", "", nil)
 
 	// Archive the first message.
 	if err := s.Archive(m1.ID); err != nil {

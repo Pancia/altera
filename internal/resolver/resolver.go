@@ -197,7 +197,7 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 	// Start terminal logging if debug mode is enabled.
 	if config.DebugEnabled(altDir) {
 		logsDir := config.LogsDir(altDir)
-		os.MkdirAll(logsDir, 0o755)
+		_ = os.MkdirAll(logsDir, 0o755)
 		logPath := filepath.Join(logsDir, id+".terminal.log")
 		_ = tmux.StartLogging(sessionName, logPath)
 	}
@@ -363,7 +363,7 @@ func (m *Manager) copyTranscript(a *agent.Agent) {
 	}
 	altDir := filepath.Join(m.projectRoot, config.DirName)
 	logsDir := config.LogsDir(altDir)
-	os.MkdirAll(logsDir, 0o755)
+	_ = os.MkdirAll(logsDir, 0o755)
 	dst := filepath.Join(logsDir, a.ID+".jsonl")
 	data, err := os.ReadFile(transcripts[0])
 	if err != nil {

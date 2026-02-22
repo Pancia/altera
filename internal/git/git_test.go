@@ -84,8 +84,8 @@ func TestCreateBranch_FromBase(t *testing.T) {
 
 	// Create a second commit on main so we can verify base works.
 	writeFile(t, repo, "second.txt", "second")
-	Add(repo, nil)
-	Commit(repo, "second commit")
+	_ = Add(repo, nil)
+	_ = Commit(repo, "second commit")
 
 	headRev, _ := Rev(repo, "HEAD")
 	firstRev, _ := Rev(repo, "HEAD~1")
@@ -118,7 +118,7 @@ func TestCreateBranch_Duplicate(t *testing.T) {
 func TestDeleteBranch(t *testing.T) {
 	repo := initRepo(t)
 
-	CreateBranch(repo, "to-delete", "")
+	_ = CreateBranch(repo, "to-delete", "")
 	if err := DeleteBranch(repo, "to-delete"); err != nil {
 		t.Fatalf("DeleteBranch: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestIsClean_StagedChanges(t *testing.T) {
 	repo := initRepo(t)
 
 	writeFile(t, repo, "staged.txt", "staged")
-	Add(repo, []string{"staged.txt"})
+	_ = Add(repo, []string{"staged.txt"})
 
 	clean, err := IsClean(repo)
 	if err != nil {
@@ -254,7 +254,7 @@ func TestHasUncommittedChanges_Staged(t *testing.T) {
 	repo := initRepo(t)
 
 	writeFile(t, repo, "new.txt", "new")
-	Add(repo, []string{"new.txt"})
+	_ = Add(repo, []string{"new.txt"})
 
 	has, err := HasUncommittedChanges(repo)
 	if err != nil {
@@ -365,15 +365,15 @@ func TestMerge_CleanMerge(t *testing.T) {
 	repo := initRepo(t)
 
 	// Create and switch to feature branch.
-	CreateBranch(repo, "feature", "")
-	Checkout(repo, "feature")
+	_ = CreateBranch(repo, "feature", "")
+	_ = Checkout(repo, "feature")
 	writeFile(t, repo, "feature.txt", "feature content")
-	Add(repo, nil)
-	Commit(repo, "add feature file")
+	_ = Add(repo, nil)
+	_ = Commit(repo, "add feature file")
 
 	// Switch back to main branch and merge.
 	mainBranch := defaultBranch(t, repo)
-	Checkout(repo, mainBranch)
+	_ = Checkout(repo, mainBranch)
 
 	result, err := Merge(repo, "feature")
 	if err != nil {
@@ -394,17 +394,17 @@ func TestMerge_Conflict(t *testing.T) {
 	mainBranch := defaultBranch(t, repo)
 
 	// Create feature branch and modify README.
-	CreateBranch(repo, "conflict", "")
-	Checkout(repo, "conflict")
+	_ = CreateBranch(repo, "conflict", "")
+	_ = Checkout(repo, "conflict")
 	writeFile(t, repo, "README.md", "conflict branch content\n")
-	Add(repo, nil)
-	Commit(repo, "conflict change")
+	_ = Add(repo, nil)
+	_ = Commit(repo, "conflict change")
 
 	// Switch to main and make a conflicting change.
-	Checkout(repo, mainBranch)
+	_ = Checkout(repo, mainBranch)
 	writeFile(t, repo, "README.md", "main branch content\n")
-	Add(repo, nil)
-	Commit(repo, "main change")
+	_ = Add(repo, nil)
+	_ = Commit(repo, "main change")
 
 	result, err := Merge(repo, "conflict")
 	if err != nil {
@@ -462,8 +462,8 @@ func TestLog(t *testing.T) {
 	repo := initRepo(t)
 
 	writeFile(t, repo, "a.txt", "a")
-	Add(repo, nil)
-	Commit(repo, "second commit")
+	_ = Add(repo, nil)
+	_ = Commit(repo, "second commit")
 
 	out, err := Log(repo, 2)
 	if err != nil {
@@ -480,7 +480,7 @@ func TestLog(t *testing.T) {
 func TestCheckout(t *testing.T) {
 	repo := initRepo(t)
 
-	CreateBranch(repo, "other", "")
+	_ = CreateBranch(repo, "other", "")
 	if err := Checkout(repo, "other"); err != nil {
 		t.Fatalf("Checkout: %v", err)
 	}

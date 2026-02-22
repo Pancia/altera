@@ -86,7 +86,7 @@ func (p *Pipeline) AttemptMerge(taskID string, defaultBranch string, testCommand
 	}
 
 	// Emit merge_started event.
-	p.events.Append(events.Event{
+	_ = p.events.Append(events.Event{
 		Timestamp: time.Now().UTC(),
 		Type:      events.MergeStarted,
 		TaskID:    taskID,
@@ -109,14 +109,14 @@ func (p *Pipeline) AttemptMerge(taskID string, defaultBranch string, testCommand
 			conflicts = append(conflicts, info)
 		}
 
-		git.AbortMerge(worktree)
+		_ = git.AbortMerge(worktree)
 
 		conflictPaths := make([]any, len(mr.Conflicts))
 		for i, c := range mr.Conflicts {
 			conflictPaths[i] = c
 		}
 
-		p.events.Append(events.Event{
+		_ = p.events.Append(events.Event{
 			Timestamp: time.Now().UTC(),
 			Type:      events.MergeConflict,
 			TaskID:    taskID,
@@ -138,9 +138,9 @@ func (p *Pipeline) AttemptMerge(taskID string, defaultBranch string, testCommand
 		testOutput, testErr := runTests(worktree, testCommand)
 		if testErr != nil {
 			// Tests failed — revert the merge commit.
-			resetHard(worktree, preHead)
+			_ = resetHard(worktree, preHead)
 
-			p.events.Append(events.Event{
+			_ = p.events.Append(events.Event{
 				Timestamp: time.Now().UTC(),
 				Type:      events.MergeFailed,
 				TaskID:    taskID,
@@ -151,7 +151,7 @@ func (p *Pipeline) AttemptMerge(taskID string, defaultBranch string, testCommand
 				},
 			})
 
-			p.messages.Create(message.TypeMergeResult, "merge-pipeline", t.AssignedTo, taskID, map[string]any{
+			_, _ = p.messages.Create(message.TypeMergeResult, "merge-pipeline", t.AssignedTo, taskID, map[string]any{
 				"outcome": string(OutcomeTestFailure),
 				"output":  testOutput,
 			})
@@ -169,14 +169,14 @@ func (p *Pipeline) AttemptMerge(taskID string, defaultBranch string, testCommand
 		return nil, fmt.Errorf("pushing merge: %w", err)
 	}
 
-	p.events.Append(events.Event{
+	_ = p.events.Append(events.Event{
 		Timestamp: time.Now().UTC(),
 		Type:      events.MergeSuccess,
 		TaskID:    taskID,
 		Data:      map[string]any{"branch": t.Branch},
 	})
 
-	p.messages.Create(message.TypeMergeResult, "merge-pipeline", t.AssignedTo, taskID, map[string]any{
+	_, _ = p.messages.Create(message.TypeMergeResult, "merge-pipeline", t.AssignedTo, taskID, map[string]any{
 		"outcome": string(OutcomeSuccess),
 	})
 
@@ -194,7 +194,7 @@ func ExtractConflicts(path string) ConflictInfo {
 	if err != nil {
 		return ConflictInfo{}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var markers []ConflictMarker
 	var current *ConflictMarker

@@ -37,15 +37,15 @@ var sessionListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSTATUS")
+		_, _ = fmt.Fprintln(w, "NAME\tSTATUS")
 		for _, s := range sessions {
 			status := "dead"
 			if tmux.SessionExists(s) {
 				status = "alive"
 			}
-			fmt.Fprintf(w, "%s\t%s\n", s, status)
+			_, _ = fmt.Fprintf(w, "%s\t%s\n", s, status)
 		}
-		w.Flush()
+		_ = w.Flush()
 		return nil
 	},
 }

@@ -276,18 +276,18 @@ func (s *Store) writeTask(t *Task) error {
 	tmpName := tmp.Name()
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("writing temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("closing temp file: %w", err)
 	}
 
 	dest := s.taskPath(t.ID)
 	if err := os.Rename(tmpName, dest); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("renaming temp to %s: %w", dest, err)
 	}
 	return nil

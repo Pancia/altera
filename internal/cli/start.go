@@ -42,7 +42,7 @@ var startCmd = &cobra.Command{
 				return fmt.Errorf("setting debug flag: %w", err)
 			}
 			// Ensure logs directory exists.
-			os.MkdirAll(filepath.Join(altDir, "logs"), 0o755)
+			_ = os.MkdirAll(filepath.Join(altDir, "logs"), 0o755)
 			fmt.Println("Debug mode enabled (terminal logging active).")
 		}
 

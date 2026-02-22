@@ -40,13 +40,13 @@ func (w *Writer) Append(events ...Event) error {
 	if err != nil {
 		return fmt.Errorf("events: open file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Acquire exclusive lock for concurrent append safety.
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("events: flock: %w", err)
 	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
 
 	enc := json.NewEncoder(f)
 	for _, ev := range events {

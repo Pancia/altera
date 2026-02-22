@@ -256,11 +256,11 @@ func TestDelete_NotFound(t *testing.T) {
 
 func TestList_ByStatus(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-aaaaaa", Title: "Open1"})
-	s.Create(&Task{ID: "t-bbbbbb", Title: "Open2"})
+	_ = s.Create(&Task{ID: "t-aaaaaa", Title: "Open1"})
+	_ = s.Create(&Task{ID: "t-bbbbbb", Title: "Open2"})
 
 	// Transition one to assigned
-	s.Update("t-aaaaaa", func(t *Task) error {
+	_ = s.Update("t-aaaaaa", func(t *Task) error {
 		t.Status = StatusAssigned
 		return nil
 	})
@@ -284,8 +284,8 @@ func TestList_ByStatus(t *testing.T) {
 
 func TestList_ByAssignee(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-aaaaaa", Title: "Assigned", AssignedTo: "slit"})
-	s.Create(&Task{ID: "t-bbbbbb", Title: "Unassigned"})
+	_ = s.Create(&Task{ID: "t-aaaaaa", Title: "Assigned", AssignedTo: "slit"})
+	_ = s.Create(&Task{ID: "t-bbbbbb", Title: "Unassigned"})
 
 	tasks, err := s.List(Filter{AssignedTo: "slit"})
 	if err != nil {
@@ -298,8 +298,8 @@ func TestList_ByAssignee(t *testing.T) {
 
 func TestList_ByTag(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-aaaaaa", Title: "Tagged", Tags: []string{"urgent", "bug"}})
-	s.Create(&Task{ID: "t-bbbbbb", Title: "Untagged"})
+	_ = s.Create(&Task{ID: "t-aaaaaa", Title: "Tagged", Tags: []string{"urgent", "bug"}})
+	_ = s.Create(&Task{ID: "t-bbbbbb", Title: "Untagged"})
 
 	tasks, err := s.List(Filter{Tag: "urgent"})
 	if err != nil {
@@ -312,8 +312,8 @@ func TestList_ByTag(t *testing.T) {
 
 func TestList_NoFilter(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-aaaaaa", Title: "One"})
-	s.Create(&Task{ID: "t-bbbbbb", Title: "Two"})
+	_ = s.Create(&Task{ID: "t-aaaaaa", Title: "One"})
+	_ = s.Create(&Task{ID: "t-bbbbbb", Title: "Two"})
 
 	tasks, err := s.List(Filter{})
 	if err != nil {
@@ -339,7 +339,7 @@ func TestList_EmptyStore(t *testing.T) {
 
 func TestFindReady_NoDeps(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-aaaaaa", Title: "No deps"})
+	_ = s.Create(&Task{ID: "t-aaaaaa", Title: "No deps"})
 
 	ready, err := s.FindReady()
 	if err != nil {
@@ -352,8 +352,8 @@ func TestFindReady_NoDeps(t *testing.T) {
 
 func TestFindReady_DepsNotDone(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-dep001", Title: "Dependency"})
-	s.Create(&Task{ID: "t-main01", Title: "Main", Deps: []string{"t-dep001"}})
+	_ = s.Create(&Task{ID: "t-dep001", Title: "Dependency"})
+	_ = s.Create(&Task{ID: "t-main01", Title: "Main", Deps: []string{"t-dep001"}})
 
 	ready, err := s.FindReady()
 	if err != nil {
@@ -368,13 +368,13 @@ func TestFindReady_DepsNotDone(t *testing.T) {
 
 func TestFindReady_DepsDone(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-dep001", Title: "Dependency"})
-	s.Create(&Task{ID: "t-main01", Title: "Main", Deps: []string{"t-dep001"}})
+	_ = s.Create(&Task{ID: "t-dep001", Title: "Dependency"})
+	_ = s.Create(&Task{ID: "t-main01", Title: "Main", Deps: []string{"t-dep001"}})
 
 	// Walk t-dep001 through to done.
-	s.Update("t-dep001", func(t *Task) error { t.Status = StatusAssigned; return nil })
-	s.Update("t-dep001", func(t *Task) error { t.Status = StatusInProgress; return nil })
-	s.Update("t-dep001", func(t *Task) error { t.Status = StatusDone; return nil })
+	_ = s.Update("t-dep001", func(t *Task) error { t.Status = StatusAssigned; return nil })
+	_ = s.Update("t-dep001", func(t *Task) error { t.Status = StatusInProgress; return nil })
+	_ = s.Update("t-dep001", func(t *Task) error { t.Status = StatusDone; return nil })
 
 	ready, err := s.FindReady()
 	if err != nil {
@@ -389,7 +389,7 @@ func TestFindReady_DepsDone(t *testing.T) {
 
 func TestFindReady_MissingDep(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-main01", Title: "Main", Deps: []string{"t-nonexist"}})
+	_ = s.Create(&Task{ID: "t-main01", Title: "Main", Deps: []string{"t-nonexist"}})
 
 	ready, err := s.FindReady()
 	if err != nil {
@@ -402,10 +402,10 @@ func TestFindReady_MissingDep(t *testing.T) {
 
 func TestFindReady_OnlyOpenTasks(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-aaaaaa", Title: "Done"})
-	s.Update("t-aaaaaa", func(t *Task) error { t.Status = StatusAssigned; return nil })
-	s.Update("t-aaaaaa", func(t *Task) error { t.Status = StatusInProgress; return nil })
-	s.Update("t-aaaaaa", func(t *Task) error { t.Status = StatusDone; return nil })
+	_ = s.Create(&Task{ID: "t-aaaaaa", Title: "Done"})
+	_ = s.Update("t-aaaaaa", func(t *Task) error { t.Status = StatusAssigned; return nil })
+	_ = s.Update("t-aaaaaa", func(t *Task) error { t.Status = StatusInProgress; return nil })
+	_ = s.Update("t-aaaaaa", func(t *Task) error { t.Status = StatusDone; return nil })
 
 	ready, err := s.FindReady()
 	if err != nil {
@@ -420,7 +420,7 @@ func TestFindReady_OnlyOpenTasks(t *testing.T) {
 
 func TestAtomicWrite_NoTempFiles(t *testing.T) {
 	s := tempStore(t)
-	s.Create(&Task{ID: "t-aaaaaa", Title: "Test"})
+	_ = s.Create(&Task{ID: "t-aaaaaa", Title: "Test"})
 
 	entries, err := os.ReadDir(s.tasksDir())
 	if err != nil {
@@ -467,7 +467,7 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// Assign
-	s.Update(task.ID, func(t *Task) error {
+	_ = s.Update(task.ID, func(t *Task) error {
 		t.Status = StatusAssigned
 		t.AssignedTo = "polecat/slit"
 		t.Branch = "polecat/slit/feature"
@@ -475,13 +475,13 @@ func TestFullLifecycle(t *testing.T) {
 	})
 
 	// Start
-	s.Update(task.ID, func(t *Task) error {
+	_ = s.Update(task.ID, func(t *Task) error {
 		t.Status = StatusInProgress
 		return nil
 	})
 
 	// Complete
-	s.Update(task.ID, func(t *Task) error {
+	_ = s.Update(task.ID, func(t *Task) error {
 		t.Status = StatusDone
 		t.Result = "Implemented successfully"
 		t.Checkpoint = "abc123"
@@ -504,7 +504,7 @@ func TestList_CorruptFileSkipped(t *testing.T) {
 	s := tempStore(t)
 
 	// Create a valid task.
-	s.Create(&Task{ID: "t-aaaaaa", Title: "Valid"})
+	_ = s.Create(&Task{ID: "t-aaaaaa", Title: "Valid"})
 
 	// Write a corrupt task file.
 	corruptPath := filepath.Join(s.tasksDir(), "t-corrupt.json")

@@ -91,7 +91,7 @@ func RenderTranscript(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("opening transcript: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Transcript: %s\n\n", filepath.Base(path)))
@@ -137,7 +137,7 @@ func renderEntry(b *strings.Builder, entry map[string]any) {
 
 // renderMessage formats a user or assistant message.
 func renderMessage(b *strings.Builder, role string, entry map[string]any) {
-	b.WriteString(fmt.Sprintf("--- %s ---\n", role))
+	fmt.Fprintf(b, "--- %s ---\n", role)
 
 	message, ok := entry["message"].(map[string]any)
 	if !ok {
@@ -167,7 +167,7 @@ func renderMessage(b *strings.Builder, role string, entry map[string]any) {
 				b.WriteByte('\n')
 			case "tool_use":
 				name, _ := blockMap["name"].(string)
-				b.WriteString(fmt.Sprintf("[tool_use: %s]\n", name))
+				fmt.Fprintf(b, "[tool_use: %s]\n", name)
 			case "tool_result":
 				b.WriteString("[tool_result]\n")
 			}

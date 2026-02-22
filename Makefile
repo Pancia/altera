@@ -7,6 +7,7 @@ LDFLAGS  = -X github.com/anthropics/altera/internal/cli.Version=$(VERSION) \
 
 install: build
 	cp bin/alt ~/.local/bin/alt
+	codesign -s - ~/.local/bin/alt
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/alt ./cmd/alt

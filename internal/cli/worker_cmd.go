@@ -68,7 +68,7 @@ var workerListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSTATUS\tTASK\tHEARTBEAT\tWORKTREE\tTMUX")
+		_, _ = fmt.Fprintln(w, "ID\tSTATUS\tTASK\tHEARTBEAT\tWORKTREE\tTMUX")
 		for _, a := range workers {
 			hbAge := time.Since(a.Heartbeat).Round(time.Second)
 			wtBase := filepath.Base(a.Worktree)
@@ -79,10 +79,10 @@ var workerListCmd = &cobra.Command{
 			if tmuxSession == "" {
 				tmuxSession = "-"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s ago\t%s\t%s\n",
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s ago\t%s\t%s\n",
 				a.ID, a.Status, a.CurrentTask, hbAge, wtBase, tmuxSession)
 		}
-		w.Flush()
+		_ = w.Flush()
 		return nil
 	},
 }

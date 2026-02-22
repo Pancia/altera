@@ -72,12 +72,12 @@ var taskListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSTATUS\tASSIGNED\tTITLE")
+		_, _ = fmt.Fprintln(w, "ID\tSTATUS\tASSIGNED\tTITLE")
 		for _, t := range tasks {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 				t.ID, t.Status, t.AssignedTo, t.Title)
 		}
-		w.Flush()
+		_ = w.Flush()
 
 		if len(tasks) == 0 {
 			fmt.Println("No tasks found.")

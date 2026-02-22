@@ -153,12 +153,12 @@ func checkMessagesTabular(agentID string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tTYPE\tFROM\tTASK")
+	_, _ = fmt.Fprintln(w, "ID\tTYPE\tFROM\tTASK")
 	for _, m := range msgs {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			m.ID, m.Type, m.From, m.TaskID)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }

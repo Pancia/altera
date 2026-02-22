@@ -109,9 +109,9 @@ func TestEnqueue_AtomicWrite(t *testing.T) {
 func TestDequeue(t *testing.T) {
 	q := newTestQueue(t)
 
-	q.Enqueue("t-first1")
+	_ = q.Enqueue("t-first1")
 	time.Sleep(time.Millisecond)
-	q.Enqueue("t-second")
+	_ = q.Enqueue("t-second")
 
 	id, err := q.Dequeue()
 	if err != nil {
@@ -132,7 +132,7 @@ func TestDequeue_FIFO_Order(t *testing.T) {
 
 	ids := []string{"t-one111", "t-two222", "t-three3"}
 	for _, id := range ids {
-		q.Enqueue(id)
+		_ = q.Enqueue(id)
 		time.Sleep(time.Millisecond)
 	}
 
@@ -159,8 +159,8 @@ func TestDequeue_Empty(t *testing.T) {
 func TestDequeue_RemovesFile(t *testing.T) {
 	q := newTestQueue(t)
 
-	q.Enqueue("t-remove")
-	q.Dequeue()
+	_ = q.Enqueue("t-remove")
+	_, _ = q.Dequeue()
 
 	entries, err := os.ReadDir(q.Dir())
 	if err != nil {
@@ -182,9 +182,9 @@ func TestDequeue_RemovesFile(t *testing.T) {
 func TestPeek(t *testing.T) {
 	q := newTestQueue(t)
 
-	q.Enqueue("t-peek11")
+	_ = q.Enqueue("t-peek11")
 	time.Sleep(time.Millisecond)
-	q.Enqueue("t-peek22")
+	_ = q.Enqueue("t-peek22")
 
 	id, err := q.Peek()
 	if err != nil {
@@ -213,7 +213,7 @@ func TestPeek_Empty(t *testing.T) {
 func TestPeek_Idempotent(t *testing.T) {
 	q := newTestQueue(t)
 
-	q.Enqueue("t-idem11")
+	_ = q.Enqueue("t-idem11")
 
 	for i := 0; i < 3; i++ {
 		id, err := q.Peek()
@@ -243,25 +243,25 @@ func TestLen_Empty(t *testing.T) {
 func TestLen_AfterEnqueueDequeue(t *testing.T) {
 	q := newTestQueue(t)
 
-	q.Enqueue("t-len001")
+	_ = q.Enqueue("t-len001")
 	time.Sleep(time.Millisecond)
-	q.Enqueue("t-len002")
+	_ = q.Enqueue("t-len002")
 	time.Sleep(time.Millisecond)
-	q.Enqueue("t-len003")
+	_ = q.Enqueue("t-len003")
 
 	n, _ := q.Len()
 	if n != 3 {
 		t.Errorf("Len = %d, want 3", n)
 	}
 
-	q.Dequeue()
+	_, _ = q.Dequeue()
 	n, _ = q.Len()
 	if n != 2 {
 		t.Errorf("Len = %d, want 2", n)
 	}
 
-	q.Dequeue()
-	q.Dequeue()
+	_, _ = q.Dequeue()
+	_, _ = q.Dequeue()
 	n, _ = q.Len()
 	if n != 0 {
 		t.Errorf("Len = %d, want 0", n)
@@ -288,11 +288,11 @@ func TestQueue_ConstraintsCompatible(t *testing.T) {
 	// to determine queue depth. Verify our queue stores one .json file per entry.
 	q := newTestQueue(t)
 
-	q.Enqueue("t-compat1")
+	_ = q.Enqueue("t-compat1")
 	time.Sleep(time.Millisecond)
-	q.Enqueue("t-compat2")
+	_ = q.Enqueue("t-compat2")
 	time.Sleep(time.Millisecond)
-	q.Enqueue("t-compat3")
+	_ = q.Enqueue("t-compat3")
 
 	entries, err := os.ReadDir(q.Dir())
 	if err != nil {

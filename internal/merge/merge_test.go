@@ -74,7 +74,7 @@ func initRepoWithRemote(t *testing.T) (repo string, mainBranch string) {
 	mainBranch = defaultBranch(t, repo)
 
 	remote := t.TempDir()
-	git.Init(remote)
+	_ = git.Init(remote)
 	runGit(t, remote, "config", "receive.denyCurrentBranch", "ignore")
 	runGit(t, repo, "remote", "add", "origin", remote)
 	runGit(t, repo, "push", "-u", "origin", mainBranch)
@@ -85,7 +85,7 @@ func initRepoWithRemote(t *testing.T) (repo string, mainBranch string) {
 func testPipeline(t *testing.T, root string) (*Pipeline, *events.Reader) {
 	t.Helper()
 	altDir := filepath.Join(root, ".alt")
-	os.MkdirAll(altDir, 0o755)
+	_ = os.MkdirAll(altDir, 0o755)
 
 	taskStore, err := task.NewStore(root)
 	if err != nil {
@@ -144,7 +144,7 @@ their content
 >>>>>>> feature
 line 8
 `
-	os.WriteFile(path, []byte(content), 0o644)
+	_ = os.WriteFile(path, []byte(content), 0o644)
 
 	info := ExtractConflicts(path)
 	if len(info.Markers) != 1 {
@@ -181,7 +181,7 @@ ours 2
 theirs 2
 >>>>>>> branch
 `
-	os.WriteFile(path, []byte(content), 0o644)
+	_ = os.WriteFile(path, []byte(content), 0o644)
 
 	info := ExtractConflicts(path)
 	if len(info.Markers) != 2 {
@@ -199,7 +199,7 @@ theirs 2
 func TestExtractConflicts_NoConflicts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "clean.txt")
-	os.WriteFile(path, []byte("no conflicts here\n"), 0o644)
+	_ = os.WriteFile(path, []byte("no conflicts here\n"), 0o644)
 
 	info := ExtractConflicts(path)
 	if len(info.Markers) != 0 {
@@ -217,7 +217,7 @@ func TestExtractConflicts_NonexistentFile(t *testing.T) {
 func TestExtractConflicts_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "empty.txt")
-	os.WriteFile(path, []byte(""), 0o644)
+	_ = os.WriteFile(path, []byte(""), 0o644)
 
 	info := ExtractConflicts(path)
 	if len(info.Markers) != 0 {
@@ -241,12 +241,12 @@ func TestAttemptMerge_Success(t *testing.T) {
 	repo, mainBranch := initRepoWithRemote(t)
 
 	// Create feature branch with a new file.
-	git.CreateBranch(repo, "feature", "")
-	git.Checkout(repo, "feature")
+	_ = git.CreateBranch(repo, "feature", "")
+	_ = git.Checkout(repo, "feature")
 	writeFile(t, repo, "feature.go", "package feature\n")
-	git.Add(repo, nil)
-	git.Commit(repo, "add feature")
-	git.Checkout(repo, mainBranch)
+	_ = git.Add(repo, nil)
+	_ = git.Commit(repo, "add feature")
+	_ = git.Checkout(repo, mainBranch)
 
 	root := t.TempDir()
 	p, evReader := testPipeline(t, root)
@@ -290,17 +290,17 @@ func TestAttemptMerge_Conflict(t *testing.T) {
 	mainBranch := defaultBranch(t, repo)
 
 	// Create feature branch that conflicts.
-	git.CreateBranch(repo, "conflict-br", "")
-	git.Checkout(repo, "conflict-br")
+	_ = git.CreateBranch(repo, "conflict-br", "")
+	_ = git.Checkout(repo, "conflict-br")
 	writeFile(t, repo, "README.md", "conflict branch content\n")
-	git.Add(repo, nil)
-	git.Commit(repo, "conflict change")
+	_ = git.Add(repo, nil)
+	_ = git.Commit(repo, "conflict change")
 
 	// Make conflicting change on main.
-	git.Checkout(repo, mainBranch)
+	_ = git.Checkout(repo, mainBranch)
 	writeFile(t, repo, "README.md", "main branch content\n")
-	git.Add(repo, nil)
-	git.Commit(repo, "main change")
+	_ = git.Add(repo, nil)
+	_ = git.Commit(repo, "main change")
 
 	root := t.TempDir()
 	p, evReader := testPipeline(t, root)
@@ -345,12 +345,12 @@ func TestAttemptMerge_TestFailure(t *testing.T) {
 	repo, mainBranch := initRepoWithRemote(t)
 
 	// Create a clean feature branch.
-	git.CreateBranch(repo, "test-fail-br", "")
-	git.Checkout(repo, "test-fail-br")
+	_ = git.CreateBranch(repo, "test-fail-br", "")
+	_ = git.Checkout(repo, "test-fail-br")
 	writeFile(t, repo, "new.txt", "new content\n")
-	git.Add(repo, nil)
-	git.Commit(repo, "add new file")
-	git.Checkout(repo, mainBranch)
+	_ = git.Add(repo, nil)
+	_ = git.Commit(repo, "add new file")
+	_ = git.Checkout(repo, mainBranch)
 
 	root := t.TempDir()
 	p, evReader := testPipeline(t, root)
@@ -385,7 +385,7 @@ func TestAttemptMerge_NoBranch(t *testing.T) {
 
 	// Create task with no branch.
 	store, _ := task.NewStore(root)
-	store.Create(&task.Task{ID: "t-nobr01", Title: "no branch"})
+	_ = store.Create(&task.Task{ID: "t-nobr01", Title: "no branch"})
 
 	_, err := p.AttemptMerge("t-nobr01", "main", "", t.TempDir())
 	if err == nil {
@@ -411,12 +411,12 @@ func TestAttemptMerge_NoTestCommand(t *testing.T) {
 	repo, mainBranch := initRepoWithRemote(t)
 
 	// Create feature branch.
-	git.CreateBranch(repo, "no-test-br", "")
-	git.Checkout(repo, "no-test-br")
+	_ = git.CreateBranch(repo, "no-test-br", "")
+	_ = git.Checkout(repo, "no-test-br")
 	writeFile(t, repo, "feature.go", "package feature\n")
-	git.Add(repo, nil)
-	git.Commit(repo, "add feature")
-	git.Checkout(repo, mainBranch)
+	_ = git.Add(repo, nil)
+	_ = git.Commit(repo, "add feature")
+	_ = git.Checkout(repo, mainBranch)
 
 	root := t.TempDir()
 	p, _ := testPipeline(t, root)
@@ -436,18 +436,18 @@ func TestAttemptMerge_NoTestCommand(t *testing.T) {
 func TestAttemptMerge_SendsMessage(t *testing.T) {
 	repo, mainBranch := initRepoWithRemote(t)
 
-	git.CreateBranch(repo, "msg-br", "")
-	git.Checkout(repo, "msg-br")
+	_ = git.CreateBranch(repo, "msg-br", "")
+	_ = git.Checkout(repo, "msg-br")
 	writeFile(t, repo, "msg.txt", "content\n")
-	git.Add(repo, nil)
-	git.Commit(repo, "add msg file")
-	git.Checkout(repo, mainBranch)
+	_ = git.Add(repo, nil)
+	_ = git.Commit(repo, "add msg file")
+	_ = git.Checkout(repo, mainBranch)
 
 	root := t.TempDir()
 	p, _ := testPipeline(t, root)
 	createTask(t, root, "t-msg001", "msg-br", "worker-1")
 
-	p.AttemptMerge("t-msg001", mainBranch, "true", repo)
+	_, _ = p.AttemptMerge("t-msg001", mainBranch, "true", repo)
 
 	// Check that a merge_result message was sent to the worker.
 	msgDir := filepath.Join(root, ".alt", "messages")
@@ -515,19 +515,19 @@ func TestOutcomeValues(t *testing.T) {
 func TestQueueThenMerge(t *testing.T) {
 	repo, mainBranch := initRepoWithRemote(t)
 
-	git.CreateBranch(repo, "queued-br", "")
-	git.Checkout(repo, "queued-br")
+	_ = git.CreateBranch(repo, "queued-br", "")
+	_ = git.Checkout(repo, "queued-br")
 	writeFile(t, repo, "queued.txt", "content\n")
-	git.Add(repo, nil)
-	git.Commit(repo, "queued change")
-	git.Checkout(repo, mainBranch)
+	_ = git.Add(repo, nil)
+	_ = git.Commit(repo, "queued change")
+	_ = git.Checkout(repo, mainBranch)
 
 	root := t.TempDir()
 	p, _ := testPipeline(t, root)
 	createTask(t, root, "t-queued", "queued-br", "worker-1")
 
 	// Enqueue, then dequeue and merge.
-	p.queue.Enqueue("t-queued")
+	_ = p.queue.Enqueue("t-queued")
 	time.Sleep(time.Millisecond)
 	taskID, _ := p.queue.Dequeue()
 

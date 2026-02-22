@@ -62,12 +62,12 @@ var logCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "TIME\tTYPE\tAGENT\tTASK")
+		_, _ = fmt.Fprintln(w, "TIME\tTYPE\tAGENT\tTASK")
 		for _, ev := range evts {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 				ev.Timestamp.Format(time.RFC3339), ev.Type, ev.AgentID, ev.TaskID)
 		}
-		w.Flush()
+		_ = w.Flush()
 
 		return nil
 	},
@@ -84,12 +84,12 @@ func tailLog(evtPath string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "TIME\tTYPE\tAGENT\tTASK")
+	_, _ = fmt.Fprintln(w, "TIME\tTYPE\tAGENT\tTASK")
 	for _, ev := range evts {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			ev.Timestamp.Format(time.RFC3339), ev.Type, ev.AgentID, ev.TaskID)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	// Track the count of events we've already seen.
 	seen := 0
@@ -118,10 +118,10 @@ func tailLog(evtPath string) error {
 				newEvts := allEvts[seen:]
 				w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 				for _, ev := range newEvts {
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+					_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 						ev.Timestamp.Format(time.RFC3339), ev.Type, ev.AgentID, ev.TaskID)
 				}
-				w.Flush()
+				_ = w.Flush()
 				seen = len(allEvts)
 			}
 		}

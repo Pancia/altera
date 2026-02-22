@@ -39,7 +39,7 @@ var setupFishCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("creating completion file: %w", err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		if err := rootCmd.GenFishCompletion(f, true); err != nil {
 			return fmt.Errorf("generating fish completions: %w", err)

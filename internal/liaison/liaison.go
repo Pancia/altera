@@ -73,13 +73,13 @@ func (m *Manager) StartLiaison() error {
 	altDir := filepath.Join(m.projectRoot, config.DirName)
 	if config.DebugEnabled(altDir) {
 		logsDir := config.LogsDir(altDir)
-		os.MkdirAll(logsDir, 0o755)
+		_ = os.MkdirAll(logsDir, 0o755)
 		logPath := filepath.Join(logsDir, AgentID+".terminal.log")
 		_ = tmux.StartLogging(SessionName, logPath)
 	}
 
 	// Start Claude Code in the session.
-	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", m.projectRoot)
+	claudeCmd := fmt.Sprintf("cd %s && env -u CLAUDECODE claude --dangerously-skip-permissions", m.projectRoot)
 	if err := tmux.SendKeys(SessionName, claudeCmd); err != nil {
 		_ = tmux.KillSession(SessionName)
 		return fmt.Errorf("starting claude code: %w", err)
@@ -284,7 +284,7 @@ func (m *Manager) writeTasks(b *strings.Builder) error {
 		if len(tasks) == 0 {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("### %s (%d)\n\n", status, len(tasks)))
+		fmt.Fprintf(b, "### %s (%d)\n\n", status, len(tasks))
 		for _, t := range tasks {
 			line := fmt.Sprintf("- **%s** `%s`", t.Title, t.ID)
 			if t.AssignedTo != "" {
@@ -313,9 +313,9 @@ func (m *Manager) writeAgents(b *strings.Builder) error {
 
 	for _, a := range active {
 		age := time.Since(a.Heartbeat).Round(time.Second)
-		b.WriteString(fmt.Sprintf("- **%s** (%s) heartbeat: %s ago", a.ID, a.Role, age))
+		fmt.Fprintf(b, "- **%s** (%s) heartbeat: %s ago", a.ID, a.Role, age)
 		if a.CurrentTask != "" {
-			b.WriteString(fmt.Sprintf(" task: %s", a.CurrentTask))
+			fmt.Fprintf(b, " task: %s", a.CurrentTask)
 		}
 		b.WriteString("\n")
 	}
@@ -347,7 +347,7 @@ func (m *Manager) writeMergeQueue(b *strings.Builder) error {
 		return jsonFiles[i].Name() < jsonFiles[j].Name()
 	})
 
-	b.WriteString(fmt.Sprintf("## Merge Queue (%d)\n\n", len(jsonFiles)))
+	fmt.Fprintf(b, "## Merge Queue (%d)\n\n", len(jsonFiles))
 	if len(jsonFiles) == 0 {
 		b.WriteString("Empty.\n\n")
 		return nil
@@ -366,7 +366,7 @@ func (m *Manager) writeMergeQueue(b *strings.Builder) error {
 		if err := json.Unmarshal(data, &item); err != nil {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("- task: %s branch: %s agent: %s\n", item.TaskID, item.Branch, item.AgentID))
+		fmt.Fprintf(b, "- task: %s branch: %s agent: %s\n", item.TaskID, item.Branch, item.AgentID)
 	}
 	b.WriteString("\n")
 
