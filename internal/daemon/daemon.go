@@ -142,7 +142,7 @@ func (d *Daemon) Run() error {
 	// Reconcile stale state from prior runs before first tick.
 	d.reconcile()
 
-	d.events.Append(events.Event{
+	_ = d.events.Append(events.Event{
 		Timestamp: time.Now(),
 		Type:      events.DaemonStarted,
 	})
@@ -158,7 +158,7 @@ func (d *Daemon) Run() error {
 		select {
 		case <-d.shutdown:
 			d.logger.Info("shutting down gracefully")
-			d.events.Append(events.Event{
+			_ = d.events.Append(events.Event{
 				Timestamp: time.Now(),
 				Type:      events.DaemonShutdown,
 			})
@@ -167,7 +167,7 @@ func (d *Daemon) Run() error {
 			d.tick()
 		case <-d.tickNow:
 			d.logger.Info("forced tick (SIGUSR1)")
-			d.events.Append(events.Event{
+			_ = d.events.Append(events.Event{
 				Timestamp: time.Now(),
 				Type:      events.DaemonTickForced,
 			})
@@ -229,7 +229,8 @@ func (d *Daemon) reconcileAgents() {
 }
 
 // reconcileTasks finds tasks assigned to dead or missing agents and
-// resets them to open status.
+// resets them to open status. Tasks already in done status are skipped
+// since their branches are needed by the merge queue.
 func (d *Daemon) reconcileTasks() {
 	for _, status := range []task.Status{task.StatusAssigned, task.StatusInProgress} {
 		tasks, err := d.tasks.List(task.Filter{Status: status})
@@ -241,10 +242,20 @@ func (d *Daemon) reconcileTasks() {
 			if t.AssignedTo == "" {
 				continue
 			}
+			// Re-read the task to get the latest status — it may have
+			// been marked done by handleTaskDone between the list and now.
+			current, err := d.tasks.Get(t.ID)
+			if err != nil {
+				d.logger.Error("reconcile tasks: re-read", "task", t.ID, "error", err)
+				continue
+			}
+			if current.Status == task.StatusDone {
+				continue
+			}
 			a, err := d.agents.Get(t.AssignedTo)
 			if err != nil || a.Status == agent.StatusDead {
 				d.logger.Info("reconcile tasks: reclaiming", "task", t.ID, "agent", t.AssignedTo)
-				branch := t.Branch
+				branch := current.Branch
 				if err := d.reclaimTask(t.ID); err != nil {
 					d.logger.Error("reconcile tasks: reclaim", "task", t.ID, "error", err)
 					continue
@@ -274,7 +285,7 @@ func (d *Daemon) reconcileMergeQueue() {
 		if strings.HasPrefix(e.Name(), ".tmp-") {
 			path := filepath.Join(queueDir, e.Name())
 			d.logger.Info("reconcile merge queue: removing temp file", "file", e.Name())
-			os.Remove(path)
+			_ = os.Remove(path)
 		}
 	}
 }
@@ -409,16 +420,22 @@ func (d *Daemon) markAgentDead(a *agent.Agent, tickEvents *[]events.Event) {
 
 	if a.CurrentTask != "" {
 		t, _ := d.tasks.Get(a.CurrentTask)
-		var branch string
-		if t != nil {
-			branch = t.Branch
-		}
-		if err := d.reclaimTask(a.CurrentTask); err != nil {
-			d.logger.Error("liveness: reclaim task", "task", a.CurrentTask, "error", err)
+		if t != nil && t.Status == task.StatusDone {
+			// Task already processed (task_done handled). Don't reclaim
+			// or clean up the branch — the merge queue needs it.
+			d.logger.Info("liveness: task already done, skipping reclaim", "task", a.CurrentTask)
 		} else {
-			d.logger.Info("liveness: reclaimed task", "task", a.CurrentTask)
-			if branch != "" {
-				d.cleanupBranch(branch)
+			var branch string
+			if t != nil {
+				branch = t.Branch
+			}
+			if err := d.reclaimTask(a.CurrentTask); err != nil {
+				d.logger.Error("liveness: reclaim task", "task", a.CurrentTask, "error", err)
+			} else {
+				d.logger.Info("liveness: reclaimed task", "task", a.CurrentTask)
+				if branch != "" {
+					d.cleanupBranch(branch)
+				}
 			}
 		}
 	}
@@ -449,7 +466,7 @@ func (d *Daemon) escalateWarning(a *agent.Agent, tickEvents *[]events.Event) {
 	// Nudge worker by writing a .alt-nudge file to its worktree.
 	if a.Worktree != "" {
 		nudgePath := filepath.Join(a.Worktree, ".alt-nudge")
-		os.WriteFile(nudgePath, []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
+		_ = os.WriteFile(nudgePath, []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
 	}
 
 	*tickEvents = append(*tickEvents, events.Event{
@@ -677,14 +694,14 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	}
 	if err := git.CreateWorktree(d.rootDir, branchName, worktreePath); err != nil {
 		// Clean up branch on failure.
-		git.DeleteBranch(d.rootDir, branchName)
+		_ = git.DeleteBranch(d.rootDir, branchName)
 		return "", fmt.Errorf("create worktree: %w", err)
 	}
 
 	// Helper to clean up git resources on failure.
 	cleanupGit := func() {
-		git.DeleteWorktree(d.rootDir, worktreePath)
-		git.DeleteBranch(d.rootDir, branchName)
+		_ = git.DeleteWorktree(d.rootDir, worktreePath)
+		_ = git.DeleteBranch(d.rootDir, branchName)
 	}
 
 	// Write task.json to worktree root.
@@ -714,7 +731,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	)
 	claudeCmd := fmt.Sprintf("cd %s && exec claude --dangerously-skip-permissions %q", worktreePath, initialPrompt)
 	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
-		tmux.KillSession(sessionName)
+		_ = tmux.KillSession(sessionName)
 		cleanupGit()
 		return "", fmt.Errorf("start claude in worker: %w", err)
 	}
@@ -732,7 +749,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	// Start terminal logging if debug mode is enabled.
 	if config.DebugEnabled(d.altDir) {
 		logsDir := config.LogsDir(d.altDir)
-		os.MkdirAll(logsDir, 0o755)
+		_ = os.MkdirAll(logsDir, 0o755)
 		logPath := filepath.Join(logsDir, agentID+".terminal.log")
 		if err := tmux.StartLogging(sessionName, logPath); err != nil {
 			d.logger.Warn("spawn: failed to start terminal logging", "agent", agentID, "error", err)
@@ -753,7 +770,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		StartedAt:   time.Now(),
 	}
 	if err := d.agents.Create(a); err != nil {
-		tmux.KillSession(sessionName)
+		_ = tmux.KillSession(sessionName)
 		cleanupGit()
 		return "", fmt.Errorf("register agent: %w", err)
 	}
@@ -765,8 +782,8 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		t.Branch = branchName
 		return nil
 	}); err != nil {
-		d.agents.Delete(agentID)
-		tmux.KillSession(sessionName)
+		_ = d.agents.Delete(agentID)
+		_ = tmux.KillSession(sessionName)
 		cleanupGit()
 		return "", fmt.Errorf("assign task: %w", err)
 	}
@@ -787,41 +804,55 @@ func (d *Daemon) processMessages(tickEvents *[]events.Event) {
 	}
 
 	for _, msg := range msgs {
+		var ok bool
 		switch msg.Type {
 		case message.TypeTaskDone:
-			d.handleTaskDone(msg, tickEvents)
+			ok = d.handleTaskDone(msg, tickEvents)
 		case message.TypeHelp:
 			d.handleHelp(msg)
+			ok = true
 		default:
 			d.logger.Info("messages: unhandled type", "type", msg.Type, "from", msg.From)
+			ok = true
 		}
 
-		// Archive processed message.
-		if err := d.messages.Archive(msg.ID); err != nil {
-			d.logger.Error("messages: archive", "message", msg.ID, "error", err)
+		// Only archive if processing succeeded; failed messages are
+		// retried on the next tick.
+		if ok {
+			if err := d.messages.Archive(msg.ID); err != nil {
+				d.logger.Error("messages: archive", "message", msg.ID, "error", err)
+			}
 		}
 	}
 }
 
 // handleTaskDone processes a task_done message by marking the task as done
-// and adding it to the merge queue.
-func (d *Daemon) handleTaskDone(msg *message.Message, tickEvents *[]events.Event) {
+// and adding it to the merge queue. Returns true if the message was fully
+// processed and can be archived, false if it should be retried next tick.
+func (d *Daemon) handleTaskDone(msg *message.Message, tickEvents *[]events.Event) bool {
 	taskID := msg.TaskID
 	if taskID == "" {
 		d.logger.Info("messages: task_done without task_id", "from", msg.From)
-		return
+		return true // malformed, don't retry
 	}
 
-	// Mark task as done.
-	if err := d.tasks.Update(taskID, func(t *task.Task) error {
-		t.Status = task.StatusDone
-		if result, ok := msg.Payload["result"].(string); ok {
-			t.Result = result
-		}
-		return nil
-	}); err != nil {
+	// Use ForceWrite to bypass status transition validation. The daemon
+	// is a privileged actor — tasks go directly from assigned to done
+	// without an intermediate in_progress step.
+	t, err := d.tasks.Get(taskID)
+	if err != nil {
+		d.logger.Error("messages: get task for done", "task", taskID, "error", err)
+		return false
+	}
+
+	t.Status = task.StatusDone
+	if result, ok := msg.Payload["result"].(string); ok {
+		t.Result = result
+	}
+	t.UpdatedAt = time.Now().UTC()
+	if err := d.tasks.ForceWrite(t); err != nil {
 		d.logger.Error("messages: mark task done", "task", taskID, "error", err)
-		return
+		return false
 	}
 
 	*tickEvents = append(*tickEvents, events.Event{
@@ -832,14 +863,11 @@ func (d *Daemon) handleTaskDone(msg *message.Message, tickEvents *[]events.Event
 	})
 
 	// Add to merge queue.
-	t, err := d.tasks.Get(taskID)
-	if err != nil {
-		d.logger.Error("messages: get task for merge queue", "task", taskID, "error", err)
-		return
-	}
 	if err := d.addToMergeQueue(t); err != nil {
 		d.logger.Error("messages: add task to merge queue", "task", taskID, "error", err)
+		return false
 	}
+	return true
 }
 
 // handleHelp forwards a help message to the first available liaison.
@@ -930,13 +958,13 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 				Data:      map[string]any{"error": err.Error()},
 			})
 			// Remove failed item to prevent infinite retry.
-			os.Remove(itemPath)
+			_ = os.Remove(itemPath)
 			continue
 		}
 
 		if !result.Clean {
 			d.logger.Info("merge: conflict", "branch", item.Branch, "conflicts", result.Conflicts)
-			git.AbortMerge(d.rootDir)
+			_ = git.AbortMerge(d.rootDir)
 
 			// Extract structured conflict info for each file.
 			conflicts := make([]merge.ConflictInfo, 0, len(result.Conflicts))
@@ -961,7 +989,7 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 			if err != nil {
 				d.logger.Error("merge: spawn resolver", "task", item.TaskID, "error", err)
 				// Fall back to notifying the original agent.
-				d.messages.Create(
+				_, _ = d.messages.Create(
 					message.TypeMergeResult,
 					"daemon",
 					item.AgentID,
@@ -976,7 +1004,7 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 			}
 
 			// Remove conflicting item from queue.
-			os.Remove(itemPath)
+			_ = os.Remove(itemPath)
 			continue
 		}
 
@@ -989,10 +1017,10 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 		})
 
 		// Remove merged item from queue.
-		os.Remove(itemPath)
+		_ = os.Remove(itemPath)
 
 		// Send success notification.
-		d.messages.Create(
+		_, _ = d.messages.Create(
 			message.TypeMergeResult,
 			"daemon",
 			item.AgentID,
@@ -1059,7 +1087,6 @@ func (d *Daemon) checkResolvers(tickEvents *[]events.Event) {
 		// Clean up the resolver agent.
 		if err := d.resolverMgr.CleanupResolver(r); err != nil {
 			d.logger.Error("resolvers: cleanup", "resolver", r.ID, "error", err)
-			continue
 		}
 
 		// Re-queue the task for merge.
@@ -1153,15 +1180,15 @@ func (d *Daemon) acquireLock() error {
 
 	// Try non-blocking exclusive lock.
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("daemon: already running (flock on %s failed): %w", d.pidFile, err)
 	}
 
 	// Write our PID.
 	pid := fmt.Sprintf("%d\n", os.Getpid())
 	if _, err := f.WriteString(pid); err != nil {
-		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
 		return fmt.Errorf("daemon: write pid: %w", err)
 	}
 
@@ -1174,9 +1201,9 @@ func (d *Daemon) releaseLock() {
 	if d.lockFile == nil {
 		return
 	}
-	syscall.Flock(int(d.lockFile.Fd()), syscall.LOCK_UN)
-	d.lockFile.Close()
-	os.Remove(d.pidFile)
+	_ = syscall.Flock(int(d.lockFile.Fd()), syscall.LOCK_UN)
+	_ = d.lockFile.Close()
+	_ = os.Remove(d.pidFile)
 	d.lockFile = nil
 }
 
@@ -1304,7 +1331,7 @@ func (d *Daemon) copyTranscript(a *agent.Agent) {
 	}
 
 	logsDir := config.LogsDir(d.altDir)
-	os.MkdirAll(logsDir, 0o755)
+	_ = os.MkdirAll(logsDir, 0o755)
 	dst := filepath.Join(logsDir, a.ID+".jsonl")
 
 	src := transcripts[0] // newest transcript
@@ -1436,16 +1463,16 @@ func atomicWrite(path string, data []byte) error {
 	tmpName := tmp.Name()
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("close temp file: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("rename temp file: %w", err)
 	}
 	return nil

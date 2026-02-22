@@ -623,14 +623,22 @@ func TestE2E_MergeConflict(t *testing.T) {
 	}
 
 	// The repo should still be in a clean state (abort was called).
+	// Filter out worktrees/ which is an expected artifact of resolver spawning.
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = root
 	statusOut, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git status: %v", err)
 	}
-	if len(statusOut) != 0 {
-		t.Errorf("repo is dirty after conflict handling: %s", statusOut)
+	var dirty []string
+	for _, line := range strings.Split(string(statusOut), "\n") {
+		if line == "" || strings.HasSuffix(line, "worktrees/") {
+			continue
+		}
+		dirty = append(dirty, line)
+	}
+	if len(dirty) != 0 {
+		t.Errorf("repo is dirty after conflict handling: %s", strings.Join(dirty, "\n"))
 	}
 }
 

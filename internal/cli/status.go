@@ -75,59 +75,10 @@ func runStatusLive(root, altDir string) error {
 }
 
 func runStatus(root, altDir string) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-
-	// Tasks section
-	taskStore, err := task.NewStore(root)
-	if err != nil {
-		return fmt.Errorf("opening task store: %w", err)
-	}
-	tasks, err := taskStore.List(task.Filter{})
-	if err != nil {
-		return fmt.Errorf("listing tasks: %w", err)
-	}
-
-	fmt.Fprintln(w, "TASKS")
-	fmt.Fprintln(w, "ID\tSTATUS\tASSIGNED\tTITLE")
-	for _, t := range tasks {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			t.ID, t.Status, t.AssignedTo, t.Title)
-	}
-	if len(tasks) == 0 {
-		fmt.Fprintln(w, "(none)")
-	}
-	w.Flush()
-
-	fmt.Println()
-
-	// Agents section
-	w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	agentStore, err := agent.NewStore(filepath.Join(altDir, "agents"))
-	if err != nil {
-		return fmt.Errorf("opening agent store: %w", err)
-	}
-	agents, err := agentStore.ListByStatus(agent.StatusActive)
-	if err != nil {
-		return fmt.Errorf("listing agents: %w", err)
-	}
-
-	fmt.Fprintln(w, "AGENTS")
-	fmt.Fprintln(w, "ID\tROLE\tSTATUS\tTASK")
-	for _, a := range agents {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			a.ID, a.Role, a.Status, a.CurrentTask)
-	}
-	if len(agents) == 0 {
-		fmt.Fprintln(w, "(none)")
-	}
-	w.Flush()
-
-	fmt.Println()
-
 	// Worktrees section
-	w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "WORKTREES")
-	fmt.Fprintln(w, "ID\tBRANCH")
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "WORKTREES")
+	_, _ = fmt.Fprintln(w, "ID\tBRANCH")
 	worktreeDir := filepath.Join(altDir, "worktrees")
 	if entries, err := os.ReadDir(worktreeDir); err == nil {
 		for _, e := range entries {
@@ -139,7 +90,7 @@ func runStatus(root, altDir string) error {
 			if brErr != nil {
 				branch = "(unknown)"
 			}
-			fmt.Fprintf(w, "%s\t%s\n", e.Name(), branch)
+			_, _ = fmt.Fprintf(w, "%s\t%s\n", e.Name(), branch)
 		}
 	}
 	// Also check the project-level worktrees directory
@@ -155,11 +106,11 @@ func runStatus(root, altDir string) error {
 				if brErr != nil {
 					branch = "(unknown)"
 				}
-				fmt.Fprintf(w, "%s\t%s\n", e.Name(), branch)
+				_, _ = fmt.Fprintf(w, "%s\t%s\n", e.Name(), branch)
 			}
 		}
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Println()
 
@@ -180,23 +131,23 @@ func runStatus(root, altDir string) error {
 
 	// Tmux Sessions section
 	w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "TMUX SESSIONS")
-	fmt.Fprintln(w, "NAME\tSTATUS")
+	_, _ = fmt.Fprintln(w, "TMUX SESSIONS")
+	_, _ = fmt.Fprintln(w, "NAME\tSTATUS")
 	sessions, err := tmux.ListSessions()
 	if err != nil {
-		fmt.Fprintf(w, "(error: %v)\n", err)
+		_, _ = fmt.Fprintf(w, "(error: %v)\n", err)
 	} else if len(sessions) == 0 {
-		fmt.Fprintln(w, "(none)")
+		_, _ = fmt.Fprintln(w, "(none)")
 	} else {
 		for _, s := range sessions {
 			status := "dead"
 			if tmux.SessionExists(s) {
 				status = "alive"
 			}
-			fmt.Fprintf(w, "%s\t%s\n", s, status)
+			_, _ = fmt.Fprintf(w, "%s\t%s\n", s, status)
 		}
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Println()
 
@@ -225,22 +176,70 @@ func runStatus(root, altDir string) error {
 
 	fmt.Println()
 
+	// Agents section
+	w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	agentStore, err := agent.NewStore(filepath.Join(altDir, "agents"))
+	if err != nil {
+		return fmt.Errorf("opening agent store: %w", err)
+	}
+	agents, err := agentStore.ListByStatus(agent.StatusActive)
+	if err != nil {
+		return fmt.Errorf("listing agents: %w", err)
+	}
+
+	_, _ = fmt.Fprintln(w, "AGENTS")
+	_, _ = fmt.Fprintln(w, "ID\tROLE\tSTATUS\tTASK")
+	for _, a := range agents {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			a.ID, a.Role, a.Status, a.CurrentTask)
+	}
+	if len(agents) == 0 {
+		_, _ = fmt.Fprintln(w, "(none)")
+	}
+	_ = w.Flush()
+
+	fmt.Println()
+
+	// Tasks section
+	taskStore, err := task.NewStore(root)
+	if err != nil {
+		return fmt.Errorf("opening task store: %w", err)
+	}
+	tasks, err := taskStore.List(task.Filter{})
+	if err != nil {
+		return fmt.Errorf("listing tasks: %w", err)
+	}
+
+	w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "TASKS")
+	_, _ = fmt.Fprintln(w, "ID\tSTATUS\tASSIGNED\tTITLE")
+	for _, t := range tasks {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			t.ID, t.Status, t.AssignedTo, t.Title)
+	}
+	if len(tasks) == 0 {
+		_, _ = fmt.Fprintln(w, "(none)")
+	}
+	_ = w.Flush()
+
+	fmt.Println()
+
 	// Recent Events section
 	w = tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "RECENT EVENTS")
-	fmt.Fprintln(w, "TIME\tTYPE\tAGENT\tTASK")
+	_, _ = fmt.Fprintln(w, "RECENT EVENTS")
+	_, _ = fmt.Fprintln(w, "TIME\tTYPE\tAGENT\tTASK")
 	evtPath := filepath.Join(altDir, "events.jsonl")
 	reader := events.NewReader(evtPath)
 	evts, err := reader.Tail(5)
 	if err == nil && len(evts) > 0 {
 		for _, ev := range evts {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 				ev.Timestamp.Format(time.RFC3339), ev.Type, ev.AgentID, ev.TaskID)
 		}
 	} else {
-		fmt.Fprintln(w, "(none)")
+		_, _ = fmt.Fprintln(w, "(none)")
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }
