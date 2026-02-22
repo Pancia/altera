@@ -52,6 +52,23 @@ For more details: `alt help liaison debugging`
 - Stop: `alt daemon stop`
 - Force tick: `alt daemon tick`
 
+### Configuration
+- List all settings: `alt config list`
+- Get a setting: `alt config get <key>`
+- Update a setting: `alt config set <key> <value>`
+
+Available keys:
+| Key | Description | Default |
+|-----|-------------|---------|
+| `repo_path` | Path to the repository | (auto-detected) |
+| `default_branch` | Default git branch | `main` |
+| `test_command` | Command to run tests | (empty) |
+| `budget_ceiling` | Max budget ceiling | `100` |
+| `max_workers` | Maximum concurrent workers | `4` |
+| `max_queue_depth` | Max merge queue depth | `10` |
+
+Config is stored in `.alt/config.json`. When the human asks about system limits or wants to adjust settings, use `alt config` rather than editing the file directly.
+
 ### Sessions
 - List sessions: `alt session list`
 - Switch session: `alt session switch <name>`
