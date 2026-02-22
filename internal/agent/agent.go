@@ -157,6 +157,12 @@ func (s *Store) TouchHeartbeat(id string) error {
 	return s.Update(a)
 }
 
+// Escalation level values for the EscalationLevel field.
+const (
+	EscalationWarning  = "warning"
+	EscalationCritical = "critical"
+)
+
 // Heartbeat escalation thresholds.
 var (
 	HeartbeatWarnTimeout     = 3 * time.Minute

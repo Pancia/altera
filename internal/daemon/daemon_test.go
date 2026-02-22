@@ -274,6 +274,292 @@ func TestCheckAgentLiveness_AliveAgent(t *testing.T) {
 	}
 }
 
+func TestCheckAgentLiveness_WarningEscalation(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	worktreeDir := t.TempDir()
+
+	// Create an agent with PID alive (our PID) but heartbeat stale > 3 min.
+	a := &agent.Agent{
+		ID:          "warn-agent",
+		Role:        agent.RoleWorker,
+		Status:      agent.StatusActive,
+		CurrentTask: "t-warn",
+		Worktree:    worktreeDir,
+		PID:         os.Getpid(),
+		Heartbeat:   time.Now().Add(-4 * time.Minute),
+		StartedAt:   time.Now().Add(-10 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.checkAgentLiveness(&tickEvents)
+
+	// Agent should remain active with warning escalation.
+	updated, err := d.agents.Get("warn-agent")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status != agent.StatusActive {
+		t.Errorf("agent status = %q, want %q", updated.Status, agent.StatusActive)
+	}
+	if updated.EscalationLevel != agent.EscalationWarning {
+		t.Errorf("escalation = %q, want %q", updated.EscalationLevel, agent.EscalationWarning)
+	}
+	if updated.LastEscalation.IsZero() {
+		t.Error("LastEscalation should be set")
+	}
+
+	// Should have an AgentWarning event.
+	if len(tickEvents) != 1 {
+		t.Fatalf("tick events = %d, want 1", len(tickEvents))
+	}
+	if tickEvents[0].Type != events.AgentWarning {
+		t.Errorf("event type = %q, want %q", tickEvents[0].Type, events.AgentWarning)
+	}
+
+	// Nudge file should exist in worktree.
+	nudgePath := filepath.Join(worktreeDir, ".alt-nudge")
+	if _, err := os.Stat(nudgePath); os.IsNotExist(err) {
+		t.Error(".alt-nudge file should be created in worktree")
+	}
+}
+
+func TestCheckAgentLiveness_WarningNoReEmit(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Agent already at warning level, heartbeat still in warning range.
+	a := &agent.Agent{
+		ID:              "warn-repeat",
+		Role:            agent.RoleWorker,
+		Status:          agent.StatusActive,
+		PID:             os.Getpid(),
+		Heartbeat:       time.Now().Add(-4 * time.Minute),
+		StartedAt:       time.Now().Add(-10 * time.Minute),
+		EscalationLevel: agent.EscalationWarning,
+		LastEscalation:  time.Now().Add(-1 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.checkAgentLiveness(&tickEvents)
+
+	// No new events — already at warning.
+	if len(tickEvents) != 0 {
+		t.Errorf("tick events = %d, want 0 (already at warning)", len(tickEvents))
+	}
+}
+
+func TestCheckAgentLiveness_CriticalEscalation(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Agent with PID alive, heartbeat stale > 6 min.
+	a := &agent.Agent{
+		ID:              "crit-agent",
+		Role:            agent.RoleWorker,
+		Status:          agent.StatusActive,
+		CurrentTask:     "t-crit",
+		PID:             os.Getpid(),
+		Heartbeat:       time.Now().Add(-7 * time.Minute),
+		StartedAt:       time.Now().Add(-20 * time.Minute),
+		EscalationLevel: agent.EscalationWarning,
+		LastEscalation:  time.Now().Add(-4 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// Create a liaison to receive notification.
+	liaison := &agent.Agent{
+		ID:        "liaison-crit",
+		Role:      agent.RoleLiaison,
+		Status:    agent.StatusActive,
+		PID:       os.Getpid(),
+		Heartbeat: time.Now(),
+		StartedAt: time.Now(),
+	}
+	if err := d.agents.Create(liaison); err != nil {
+		t.Fatalf("create liaison: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.checkAgentLiveness(&tickEvents)
+
+	// Agent should remain active with critical escalation.
+	updated, err := d.agents.Get("crit-agent")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status != agent.StatusActive {
+		t.Errorf("agent status = %q, want %q", updated.Status, agent.StatusActive)
+	}
+	if updated.EscalationLevel != agent.EscalationCritical {
+		t.Errorf("escalation = %q, want %q", updated.EscalationLevel, agent.EscalationCritical)
+	}
+
+	// Should have an AgentCritical event.
+	if len(tickEvents) != 1 {
+		t.Fatalf("tick events = %d, want 1", len(tickEvents))
+	}
+	if tickEvents[0].Type != events.AgentCritical {
+		t.Errorf("event type = %q, want %q", tickEvents[0].Type, events.AgentCritical)
+	}
+
+	// Liaison should have received a help message.
+	msgs, err := d.messages.ListPending(liaison.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("liaison messages = %d, want 1", len(msgs))
+	}
+	if msgs[0].Type != message.TypeHelp {
+		t.Errorf("message type = %q, want %q", msgs[0].Type, message.TypeHelp)
+	}
+	if msgs[0].Payload["worker_id"] != "crit-agent" {
+		t.Errorf("message worker_id = %q, want %q", msgs[0].Payload["worker_id"], "crit-agent")
+	}
+}
+
+func TestCheckAgentLiveness_DeadTimeout(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Agent with PID alive but heartbeat stale > 10 min.
+	a := &agent.Agent{
+		ID:              "dead-timeout",
+		Role:            agent.RoleWorker,
+		Status:          agent.StatusActive,
+		PID:             os.Getpid(),
+		Heartbeat:       time.Now().Add(-11 * time.Minute),
+		StartedAt:       time.Now().Add(-30 * time.Minute),
+		EscalationLevel: agent.EscalationCritical,
+		LastEscalation:  time.Now().Add(-5 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.checkAgentLiveness(&tickEvents)
+
+	// Agent should be marked dead.
+	updated, err := d.agents.Get("dead-timeout")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status != agent.StatusDead {
+		t.Errorf("agent status = %q, want %q", updated.Status, agent.StatusDead)
+	}
+	if len(tickEvents) != 1 {
+		t.Fatalf("tick events = %d, want 1", len(tickEvents))
+	}
+	if tickEvents[0].Type != events.AgentDied {
+		t.Errorf("event type = %q, want %q", tickEvents[0].Type, events.AgentDied)
+	}
+}
+
+func TestCheckAgentLiveness_HeartbeatRecovery(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Agent was at warning level but heartbeat is now fresh.
+	a := &agent.Agent{
+		ID:              "recovered",
+		Role:            agent.RoleWorker,
+		Status:          agent.StatusActive,
+		PID:             os.Getpid(),
+		Heartbeat:       time.Now(), // fresh
+		StartedAt:       time.Now().Add(-10 * time.Minute),
+		EscalationLevel: agent.EscalationWarning,
+		LastEscalation:  time.Now().Add(-2 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.checkAgentLiveness(&tickEvents)
+
+	// Agent should remain active with cleared escalation.
+	updated, err := d.agents.Get("recovered")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status != agent.StatusActive {
+		t.Errorf("agent status = %q, want %q", updated.Status, agent.StatusActive)
+	}
+	if updated.EscalationLevel != "" {
+		t.Errorf("escalation = %q, want empty", updated.EscalationLevel)
+	}
+	if !updated.LastEscalation.IsZero() {
+		t.Errorf("LastEscalation should be zero after recovery")
+	}
+	if len(tickEvents) != 0 {
+		t.Errorf("tick events = %d, want 0", len(tickEvents))
+	}
+}
+
+func TestCheckAgentLiveness_PIDMissing_ImmediateDeath(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Agent with fresh heartbeat but missing PID — should die immediately.
+	a := &agent.Agent{
+		ID:        "pid-gone",
+		Role:      agent.RoleWorker,
+		Status:    agent.StatusActive,
+		PID:       9999999,
+		Heartbeat: time.Now(), // heartbeat is fresh, but PID is gone
+		StartedAt: time.Now().Add(-5 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.checkAgentLiveness(&tickEvents)
+
+	updated, err := d.agents.Get("pid-gone")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if updated.Status != agent.StatusDead {
+		t.Errorf("agent status = %q, want %q (PID missing = immediate death)", updated.Status, agent.StatusDead)
+	}
+	if len(tickEvents) != 1 {
+		t.Fatalf("tick events = %d, want 1", len(tickEvents))
+	}
+	if tickEvents[0].Type != events.AgentDied {
+		t.Errorf("event type = %q, want %q", tickEvents[0].Type, events.AgentDied)
+	}
+}
+
 func TestCheckProgress_StalledWorker(t *testing.T) {
 	root := setupTestProject(t)
 	d, err := New(root)

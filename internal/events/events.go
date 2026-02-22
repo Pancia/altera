@@ -19,6 +19,8 @@ const (
 	TaskFailed     Type = "task_failed"
 	AgentSpawned   Type = "agent_spawned"
 	AgentDied      Type = "agent_died"
+	AgentWarning   Type = "agent_warning"
+	AgentCritical  Type = "agent_critical"
 	MergeStarted   Type = "merge_started"
 	MergeSuccess   Type = "merge_success"
 	MergeConflict  Type = "merge_conflict"

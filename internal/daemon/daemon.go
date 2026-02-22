@@ -315,8 +315,13 @@ func (d *Daemon) tick() {
 
 // --- Step 1: CheckAgentLiveness ---
 
-// checkAgentLiveness checks heartbeat timestamps and OS process existence
-// for all active agents. Dead agents have their tasks reclaimed.
+// checkAgentLiveness implements 3-stage heartbeat escalation for active agents:
+//
+//	Warning  – heartbeat stale > 3 min, PID alive: log, nudge worker, set escalation.
+//	Critical – heartbeat stale > 6 min, PID alive: notify liaison, set escalation.
+//	Dead     – heartbeat stale > 10 min (PID alive) OR PID missing: kill, reclaim.
+//
+// If the heartbeat becomes fresh again the escalation level is cleared.
 func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 	active, err := d.agents.ListByStatus(agent.StatusActive)
 	if err != nil {
@@ -329,50 +334,167 @@ func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 		if a.Role == agent.RoleLiaison {
 			continue
 		}
-		if agent.CheckLiveness(a) {
+
+		pidAlive := agent.CheckPID(a)
+		staleness := agent.HeartbeatStaleness(a)
+
+		// PID missing = immediate death (process crashed), skip escalation.
+		if !pidAlive {
+			d.markAgentDead(a, tickEvents)
 			continue
 		}
 
-		d.logger.Info("liveness: agent dead", "agent", a.ID, "role", a.Role, "task", a.CurrentTask)
-
-		// Mark agent as dead.
-		a.Status = agent.StatusDead
-		if err := d.agents.Update(a); err != nil {
-			d.logger.Error("liveness: update agent", "agent", a.ID, "error", err)
-			continue
-		}
-
-		*tickEvents = append(*tickEvents, events.Event{
-			Timestamp: time.Now(),
-			Type:      events.AgentDied,
-			AgentID:   a.ID,
-			TaskID:    a.CurrentTask,
-		})
-
-		// Reclaim task and clean up git resources.
-		if a.CurrentTask != "" {
-			t, _ := d.tasks.Get(a.CurrentTask)
-			var branch string
-			if t != nil {
-				branch = t.Branch
-			}
-			if err := d.reclaimTask(a.CurrentTask); err != nil {
-				d.logger.Error("liveness: reclaim task", "task", a.CurrentTask, "error", err)
-			} else {
-				d.logger.Info("liveness: reclaimed task", "task", a.CurrentTask)
-				if branch != "" {
-					d.cleanupBranch(branch)
+		// PID alive, heartbeat fresh — clear any prior escalation.
+		if staleness <= agent.HeartbeatWarnTimeout {
+			if a.EscalationLevel != "" {
+				d.logger.Info("liveness: heartbeat recovered", "agent", a.ID, "was", a.EscalationLevel)
+				a.EscalationLevel = ""
+				a.LastEscalation = time.Time{}
+				if err := d.agents.Update(a); err != nil {
+					d.logger.Error("liveness: clear escalation", "agent", a.ID, "error", err)
 				}
 			}
+			continue
 		}
 
-		// Clean up tmux session if it exists.
-		if a.TmuxSession != "" && tmux.SessionExists(a.TmuxSession) {
-			if err := tmux.KillSession(a.TmuxSession); err != nil {
-				d.logger.Error("liveness: kill tmux session", "session", a.TmuxSession, "error", err)
+		// PID alive, heartbeat stale > DeadTimeout → dead.
+		if staleness > agent.HeartbeatDeadTimeout {
+			d.markAgentDead(a, tickEvents)
+			continue
+		}
+
+		// PID alive, heartbeat stale > CriticalTimeout → critical.
+		if staleness > agent.HeartbeatCriticalTimeout {
+			if a.EscalationLevel != agent.EscalationCritical {
+				d.escalateCritical(a, tickEvents)
+			}
+			continue
+		}
+
+		// PID alive, heartbeat stale > WarnTimeout → warning.
+		if a.EscalationLevel == "" {
+			d.escalateWarning(a, tickEvents)
+		}
+	}
+}
+
+// markAgentDead marks an agent as dead, emits an AgentDied event, reclaims
+// its task, and tears down its tmux session and git resources.
+func (d *Daemon) markAgentDead(a *agent.Agent, tickEvents *[]events.Event) {
+	d.logger.Info("liveness: agent dead", "agent", a.ID, "role", a.Role, "task", a.CurrentTask)
+
+	a.Status = agent.StatusDead
+	if err := d.agents.Update(a); err != nil {
+		d.logger.Error("liveness: update agent", "agent", a.ID, "error", err)
+		return
+	}
+
+	*tickEvents = append(*tickEvents, events.Event{
+		Timestamp: time.Now(),
+		Type:      events.AgentDied,
+		AgentID:   a.ID,
+		TaskID:    a.CurrentTask,
+	})
+
+	if a.CurrentTask != "" {
+		t, _ := d.tasks.Get(a.CurrentTask)
+		var branch string
+		if t != nil {
+			branch = t.Branch
+		}
+		if err := d.reclaimTask(a.CurrentTask); err != nil {
+			d.logger.Error("liveness: reclaim task", "task", a.CurrentTask, "error", err)
+		} else {
+			d.logger.Info("liveness: reclaimed task", "task", a.CurrentTask)
+			if branch != "" {
+				d.cleanupBranch(branch)
 			}
 		}
 	}
+
+	if a.TmuxSession != "" && tmux.SessionExists(a.TmuxSession) {
+		if err := tmux.KillSession(a.TmuxSession); err != nil {
+			d.logger.Error("liveness: kill tmux session", "session", a.TmuxSession, "error", err)
+		}
+	}
+}
+
+// escalateWarning sets the agent's escalation level to warning, writes
+// a .alt-nudge file to its worktree, and emits an AgentWarning event.
+func (d *Daemon) escalateWarning(a *agent.Agent, tickEvents *[]events.Event) {
+	d.logger.Warn("liveness: escalating to warning", "agent", a.ID,
+		"staleness", agent.HeartbeatStaleness(a).Round(time.Second))
+
+	a.EscalationLevel = agent.EscalationWarning
+	a.LastEscalation = time.Now()
+	if err := d.agents.Update(a); err != nil {
+		d.logger.Error("liveness: update escalation", "agent", a.ID, "error", err)
+		return
+	}
+
+	// Nudge worker by writing a .alt-nudge file to its worktree.
+	if a.Worktree != "" {
+		nudgePath := filepath.Join(a.Worktree, ".alt-nudge")
+		os.WriteFile(nudgePath, []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
+	}
+
+	*tickEvents = append(*tickEvents, events.Event{
+		Timestamp: time.Now(),
+		Type:      events.AgentWarning,
+		AgentID:   a.ID,
+		TaskID:    a.CurrentTask,
+		Data: map[string]any{
+			"escalation_level":  agent.EscalationWarning,
+			"staleness_seconds": int(agent.HeartbeatStaleness(a).Seconds()),
+		},
+	})
+}
+
+// escalateCritical sets the agent's escalation level to critical, notifies
+// the liaison that the worker appears unresponsive, and emits an AgentCritical event.
+func (d *Daemon) escalateCritical(a *agent.Agent, tickEvents *[]events.Event) {
+	d.logger.Warn("liveness: escalating to critical", "agent", a.ID,
+		"staleness", agent.HeartbeatStaleness(a).Round(time.Second))
+
+	a.EscalationLevel = agent.EscalationCritical
+	a.LastEscalation = time.Now()
+	if err := d.agents.Update(a); err != nil {
+		d.logger.Error("liveness: update escalation", "agent", a.ID, "error", err)
+		return
+	}
+
+	// Notify liaison that worker appears unresponsive.
+	liaisons, err := d.agents.ListByRole(agent.RoleLiaison)
+	if err == nil && len(liaisons) > 0 {
+		_, err := d.messages.Create(
+			message.TypeHelp,
+			"daemon",
+			liaisons[0].ID,
+			a.CurrentTask,
+			map[string]any{
+				"worker_id":        a.ID,
+				"escalation_level": agent.EscalationCritical,
+				"message": fmt.Sprintf("worker %s appears unresponsive (heartbeat stale for %s)",
+					a.ID, agent.HeartbeatStaleness(a).Round(time.Second)),
+			},
+		)
+		if err != nil {
+			d.logger.Error("liveness: notify liaison", "error", err)
+		}
+	} else {
+		d.logger.Info("liveness: no liaison to notify", "agent", a.ID)
+	}
+
+	*tickEvents = append(*tickEvents, events.Event{
+		Timestamp: time.Now(),
+		Type:      events.AgentCritical,
+		AgentID:   a.ID,
+		TaskID:    a.CurrentTask,
+		Data: map[string]any{
+			"escalation_level":  agent.EscalationCritical,
+			"staleness_seconds": int(agent.HeartbeatStaleness(a).Seconds()),
+		},
+	})
 }
 
 // reclaimTask forces a task back to open status, bypassing normal transition
