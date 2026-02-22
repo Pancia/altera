@@ -268,6 +268,7 @@ func (m *Manager) CleanupWorker(a *agent.Agent) error {
 		Type:      events.AgentDied,
 		AgentID:   a.ID,
 		TaskID:    a.CurrentTask,
+		Data:      map[string]any{"reason": "killed"},
 	})
 
 	if len(errs) > 0 {

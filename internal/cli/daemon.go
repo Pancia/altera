@@ -3,10 +3,13 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anthropics/altera/internal/daemon"
 	"github.com/spf13/cobra"
 )
+
+var daemonStatusVerbose bool
 
 func init() {
 	rootCmd.AddCommand(daemonCmd)
@@ -14,6 +17,7 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
 	daemonCmd.AddCommand(daemonTickCmd)
+	daemonStatusCmd.Flags().BoolVar(&daemonStatusVerbose, "verbose", false, "show detailed daemon state")
 }
 
 var daemonCmd = &cobra.Command{
@@ -75,6 +79,31 @@ var daemonStatusCmd = &cobra.Command{
 		} else {
 			fmt.Println("Daemon is not running.")
 		}
+
+		if daemonStatusVerbose {
+			state, err := daemon.ReadState(altDir)
+			if err != nil {
+				fmt.Println("\nNo daemon state available.")
+				return nil
+			}
+			fmt.Printf("\nLast tick:       %s (%s ago)\n", state.LastTick.Format(time.RFC3339), time.Since(state.LastTick).Round(time.Second))
+			fmt.Printf("Tick number:     %d\n", state.TickNum)
+			fmt.Printf("Active workers:  %d\n", state.ActiveWorkers)
+			fmt.Printf("Dead workers:    %d\n", state.DeadWorkers)
+			if state.LastSpawnTask != "" {
+				fmt.Printf("Last spawn task: %s\n", state.LastSpawnTask)
+				if state.LastSpawnError != "" {
+					fmt.Printf("Last spawn error: %s\n", state.LastSpawnError)
+				}
+			}
+			if len(state.RecentErrors) > 0 {
+				fmt.Println("\nRecent errors:")
+				for _, e := range state.RecentErrors {
+					fmt.Printf("  %s\n", e)
+				}
+			}
+		}
+
 		return nil
 	},
 }

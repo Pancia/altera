@@ -61,6 +61,11 @@ type Daemon struct {
 	tickNum  int64
 	shutdown chan struct{} // closed to signal shutdown
 	tickNow  chan struct{} // buffered(1), receives SIGUSR1 forced ticks
+
+	// State tracking for observability (written to daemon-state.json each tick).
+	lastSpawnTask  string
+	lastSpawnError string
+	recentErrors   []string // capped at 10
 }
 
 // New creates a Daemon rooted at the given project directory. The .alt/
@@ -331,6 +336,7 @@ func (d *Daemon) tick() {
 	d.checkResolvers(&tickEvents)
 	d.checkConstraints(&tickEvents)
 	d.emitEvents(tickEvents)
+	d.writeState()
 
 	d.logger.Info("tick complete", "tick", d.tickNum, "duration", time.Since(start).Round(time.Millisecond))
 }
@@ -362,7 +368,7 @@ func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 
 		// PID missing = immediate death (process crashed), skip escalation.
 		if !pidAlive {
-			d.markAgentDead(a, tickEvents)
+			d.markAgentDead(a, "pid_not_found", tickEvents)
 			continue
 		}
 
@@ -381,7 +387,7 @@ func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 
 		// PID alive, heartbeat stale > DeadTimeout → dead.
 		if staleness > agent.HeartbeatDeadTimeout {
-			d.markAgentDead(a, tickEvents)
+			d.markAgentDead(a, "heartbeat_timeout", tickEvents)
 			continue
 		}
 
@@ -402,8 +408,8 @@ func (d *Daemon) checkAgentLiveness(tickEvents *[]events.Event) {
 
 // markAgentDead marks an agent as dead, emits an AgentDied event, reclaims
 // its task, and tears down its tmux session and git resources.
-func (d *Daemon) markAgentDead(a *agent.Agent, tickEvents *[]events.Event) {
-	d.logger.Info("liveness: agent dead", "agent", a.ID, "role", a.Role, "task", a.CurrentTask)
+func (d *Daemon) markAgentDead(a *agent.Agent, reason string, tickEvents *[]events.Event) {
+	d.logger.Info("liveness: agent dead", "agent", a.ID, "role", a.Role, "task", a.CurrentTask, "reason", reason)
 
 	a.Status = agent.StatusDead
 	if err := d.agents.Update(a); err != nil {
@@ -416,6 +422,7 @@ func (d *Daemon) markAgentDead(a *agent.Agent, tickEvents *[]events.Event) {
 		Type:      events.AgentDied,
 		AgentID:   a.ID,
 		TaskID:    a.CurrentTask,
+		Data:      map[string]any{"reason": reason},
 	})
 
 	if a.CurrentTask != "" {
@@ -652,8 +659,19 @@ func (d *Daemon) assignTasks(tickEvents *[]events.Event) {
 		agentID, err := d.spawnWorker(t)
 		if err != nil {
 			d.logger.Error("assign: spawn worker", "task", t.ID, "error", err)
+			d.lastSpawnTask = t.ID
+			d.lastSpawnError = err.Error()
+			d.recordError(fmt.Sprintf("spawn %s: %s", t.ID, err.Error()))
+			*tickEvents = append(*tickEvents, events.Event{
+				Timestamp: time.Now(),
+				Type:      events.AgentSpawnFailed,
+				TaskID:    t.ID,
+				Data:      map[string]any{"error": err.Error()},
+			})
 			continue
 		}
+		d.lastSpawnTask = t.ID
+		d.lastSpawnError = ""
 
 		*tickEvents = append(*tickEvents, events.Event{
 			Timestamp: time.Now(),
@@ -729,7 +747,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		"Read task.json, then run alt help worker startup for full instructions. When finished, run: alt task-done %s %s",
 		t.ID, agentID,
 	)
-	claudeCmd := fmt.Sprintf("cd %s && exec claude --dangerously-skip-permissions %q", worktreePath, initialPrompt)
+	claudeCmd := fmt.Sprintf("cd %s && env -u CLAUDECODE ALT_AGENT_ID=%s exec claude --dangerously-skip-permissions %q", worktreePath, agentID, initialPrompt)
 	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
 		_ = tmux.KillSession(sessionName)
 		cleanupGit()
@@ -1168,6 +1186,53 @@ func (d *Daemon) emitEvents(tickEvents []events.Event) {
 	}
 }
 
+// --- State File ---
+
+// recordError appends an error message to recentErrors, capped at 10.
+func (d *Daemon) recordError(msg string) {
+	entry := time.Now().UTC().Format(time.RFC3339) + " " + msg
+	d.recentErrors = append(d.recentErrors, entry)
+	if len(d.recentErrors) > 10 {
+		d.recentErrors = d.recentErrors[len(d.recentErrors)-10:]
+	}
+}
+
+// writeState writes the daemon's internal state to .alt/daemon-state.json.
+func (d *Daemon) writeState() {
+	active, _ := d.agents.ListByStatus(agent.StatusActive)
+	dead, _ := d.agents.ListByStatus(agent.StatusDead)
+
+	// Exclude liaison from counts.
+	activeCount := 0
+	for _, a := range active {
+		if a.Role != agent.RoleLiaison {
+			activeCount++
+		}
+	}
+
+	state := DaemonState{
+		LastTick:       time.Now().UTC(),
+		TickNum:        d.tickNum,
+		ActiveWorkers:  activeCount,
+		DeadWorkers:    len(dead),
+		LastSpawnTask:  d.lastSpawnTask,
+		LastSpawnError: d.lastSpawnError,
+		RecentErrors:   d.recentErrors,
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		d.logger.Error("writeState: marshal", "error", err)
+		return
+	}
+	data = append(data, '\n')
+
+	path := filepath.Join(d.altDir, "daemon-state.json")
+	if err := atomicWrite(path, data); err != nil {
+		d.logger.Error("writeState: write", "error", err)
+	}
+}
+
 // --- PID File & Lock Management ---
 
 // acquireLock writes the daemon PID to .alt/daemon.pid and acquires
@@ -1247,6 +1312,32 @@ func (d *Daemon) installSignalHandler() {
 type Status struct {
 	Running bool  `json:"running"`
 	PID     int   `json:"pid,omitempty"`
+}
+
+// DaemonState represents the daemon's internal state, written to
+// .alt/daemon-state.json each tick for observability.
+type DaemonState struct {
+	LastTick       time.Time `json:"last_tick"`
+	TickNum        int64     `json:"tick_num"`
+	ActiveWorkers  int       `json:"active_workers"`
+	DeadWorkers    int       `json:"dead_workers"`
+	LastSpawnTask  string    `json:"last_spawn_task,omitempty"`
+	LastSpawnError string    `json:"last_spawn_error,omitempty"`
+	RecentErrors   []string  `json:"recent_errors,omitempty"`
+}
+
+// ReadState reads the daemon state file from .alt/daemon-state.json.
+func ReadState(altDir string) (DaemonState, error) {
+	path := filepath.Join(altDir, "daemon-state.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return DaemonState{}, err
+	}
+	var state DaemonState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return DaemonState{}, err
+	}
+	return state, nil
 }
 
 // ReadStatus checks whether a daemon is running by reading the PID file

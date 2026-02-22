@@ -328,6 +328,7 @@ func (m *Manager) CleanupResolver(a *agent.Agent) error {
 		Type:      events.AgentDied,
 		AgentID:   a.ID,
 		TaskID:    a.CurrentTask,
+		Data:      map[string]any{"reason": "resolved"},
 	})
 
 	if len(errs) > 0 {

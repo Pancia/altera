@@ -62,6 +62,13 @@ var startCmd = &cobra.Command{
 			if err := tmux.SendKeys(daemonSessionName, daemonCmd); err != nil {
 				return fmt.Errorf("starting daemon: %w", err)
 			}
+			// Start terminal logging for daemon if debug mode is enabled.
+			if startDebug {
+				logPath := filepath.Join(altDir, "logs", "daemon.terminal.log")
+				if err := tmux.StartLogging(daemonSessionName, logPath); err != nil {
+					fmt.Printf("Warning: could not start daemon terminal logging: %v\n", err)
+				}
+			}
 			fmt.Println("Daemon started.")
 		}
 
