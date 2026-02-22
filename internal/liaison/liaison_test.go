@@ -113,8 +113,8 @@ func TestWriteClaudeSettings(t *testing.T) {
 	if !ok || len(ss) == 0 {
 		t.Fatal("missing SessionStart hook")
 	}
-	if len(ss[0].Hooks) == 0 || ss[0].Hooks[0].Command != "alt liaison prime" {
-		t.Errorf("SessionStart command = %q, want %q", ss[0].Hooks[0].Command, "alt liaison prime")
+	if len(ss[0].Hooks) == 0 || ss[0].Hooks[0].Command != "alt prime" {
+		t.Errorf("SessionStart command = %q, want %q", ss[0].Hooks[0].Command, "alt prime")
 	}
 
 	// Verify UserPromptSubmit hook.
@@ -131,8 +131,8 @@ func TestWriteClaudeSettings(t *testing.T) {
 	if !ok || len(pc) == 0 {
 		t.Fatal("missing PreCompact hook")
 	}
-	if len(pc[0].Hooks) == 0 || pc[0].Hooks[0].Command != "alt liaison prime" {
-		t.Errorf("PreCompact command = %q, want %q", pc[0].Hooks[0].Command, "alt liaison prime")
+	if len(pc[0].Hooks) == 0 || pc[0].Hooks[0].Command != "alt prime" {
+		t.Errorf("PreCompact command = %q, want %q", pc[0].Hooks[0].Command, "alt prime")
 	}
 }
 
