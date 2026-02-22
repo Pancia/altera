@@ -15,10 +15,11 @@ func init() {
 var checkpointMsg string
 
 var checkpointCmd = &cobra.Command{
-	Use:   "checkpoint <task-id>",
-	Short: "Save a checkpoint for a task",
-	Long:  `Records a checkpoint message on a task, capturing progress state.`,
-	Args:  cobra.ExactArgs(1),
+	Use:               "checkpoint <task-id>",
+	Short:             "Save a checkpoint for a task",
+	Long:              `Records a checkpoint message on a task, capturing progress state.`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTaskIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := projectRoot()
 		if err != nil {

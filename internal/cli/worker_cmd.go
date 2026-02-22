@@ -80,9 +80,10 @@ var workerListCmd = &cobra.Command{
 }
 
 var workerAttachCmd = &cobra.Command{
-	Use:   "attach <id>",
-	Short: "Attach to a worker's tmux session",
-	Args:  cobra.ExactArgs(1),
+	Use:               "attach <id>",
+	Short:             "Attach to a worker's tmux session",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeWorkerIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {
@@ -106,9 +107,10 @@ var workerAttachCmd = &cobra.Command{
 }
 
 var workerPeekCmd = &cobra.Command{
-	Use:   "peek <id>",
-	Short: "Capture recent output from a worker's tmux pane",
-	Args:  cobra.ExactArgs(1),
+	Use:               "peek <id>",
+	Short:             "Capture recent output from a worker's tmux pane",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeWorkerIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {
@@ -138,9 +140,10 @@ var workerPeekCmd = &cobra.Command{
 }
 
 var workerKillCmd = &cobra.Command{
-	Use:   "kill <id>",
-	Short: "Kill a worker (tmux session, worktree, mark dead)",
-	Args:  cobra.ExactArgs(1),
+	Use:               "kill <id>",
+	Short:             "Kill a worker (tmux session, worktree, mark dead)",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeWorkerIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {
@@ -170,9 +173,10 @@ var workerKillCmd = &cobra.Command{
 }
 
 var workerInspectCmd = &cobra.Command{
-	Use:   "inspect <id>",
-	Short: "Show detailed info about a worker",
-	Args:  cobra.ExactArgs(1),
+	Use:               "inspect <id>",
+	Short:             "Show detailed info about a worker",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeWorkerIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {

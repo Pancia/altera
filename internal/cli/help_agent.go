@@ -24,6 +24,7 @@ Examples:
   alt help worker startup
   alt help worker task-done`,
 	DisableFlagsInUseLine: true,
+	ValidArgsFunction:     completeHelpArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "Available agent types:")

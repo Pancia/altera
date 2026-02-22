@@ -51,9 +51,10 @@ var sessionListCmd = &cobra.Command{
 }
 
 var sessionSwitchCmd = &cobra.Command{
-	Use:   "switch <name>",
-	Short: "Attach to a tmux session (auto-prepends alt- prefix if needed)",
-	Args:  cobra.ExactArgs(1),
+	Use:               "switch <name>",
+	Short:             "Attach to a tmux session (auto-prepends alt- prefix if needed)",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		// Auto-prepend alt- prefix if not present.

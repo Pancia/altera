@@ -105,7 +105,8 @@ var liaisonCheckCmd = &cobra.Command{
 	Short: "Check pending messages for the liaison (or a specific agent)",
 	Long: `Lists all pending messages addressed to the liaison agent.
 If an agent-id argument is provided, lists messages for that agent instead.`,
-	Args: cobra.MaximumNArgs(1),
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeAgentIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// If an explicit agent-id is given, use the old tabular format.
 		if len(args) == 1 {

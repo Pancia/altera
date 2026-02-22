@@ -13,10 +13,11 @@ func init() {
 }
 
 var heartbeatCmd = &cobra.Command{
-	Use:   "heartbeat <agent-id>",
-	Short: "Update an agent's heartbeat timestamp",
-	Long:  `Touches the heartbeat for the given agent, signaling it is still alive.`,
-	Args:  cobra.ExactArgs(1),
+	Use:               "heartbeat <agent-id>",
+	Short:             "Update an agent's heartbeat timestamp",
+	Long:              `Touches the heartbeat for the given agent, signaling it is still alive.`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeAgentIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {

@@ -22,6 +22,13 @@ func init() {
 	taskListCmd.Flags().StringVar(&taskListAssignee, "assignee", "", "filter by assignee")
 	taskListCmd.Flags().StringVar(&taskListTag, "tag", "", "filter by tag")
 
+	taskListCmd.RegisterFlagCompletionFunc("status", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"open", "assigned", "in_progress", "done", "failed"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	taskListCmd.RegisterFlagCompletionFunc("rig", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return completeRigNames(cmd, nil, toComplete)
+	})
+
 	taskCreateCmd.Flags().StringVar(&taskCreateTitle, "title", "", "task title (required)")
 	taskCreateCmd.Flags().StringVar(&taskCreateDesc, "description", "", "task description")
 }
@@ -90,10 +97,11 @@ var taskListCmd = &cobra.Command{
 }
 
 var taskShowCmd = &cobra.Command{
-	Use:   "show <id>",
-	Short: "Show task details",
-	Long:  `Display full details for a task.`,
-	Args:  cobra.ExactArgs(1),
+	Use:               "show <id>",
+	Short:             "Show task details",
+	Long:              `Display full details for a task.`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeTaskIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := projectRoot()
 		if err != nil {
