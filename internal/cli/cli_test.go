@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func TestSubcommandRegistration(t *testing.T) {
 	expected := []string{
 		"status", "task", "log", "rig", "work",
 		"daemon", "heartbeat", "checkpoint", "liaison",
-		"worker", "session", "prime", "setup",
+		"worker", "session", "prime", "setup", "help",
 	}
 	cmds := rootCmd.Commands()
 	names := make(map[string]bool)
@@ -454,6 +455,50 @@ func TestSetupSubcommands(t *testing.T) {
 		}
 	}
 	t.Fatal("setup command not found")
+}
+
+func TestHelpAgentNoArgs(t *testing.T) {
+	out, err := executeCmd(t, "help")
+	if err != nil {
+		t.Fatalf("help command failed: %v", err)
+	}
+	if !strings.Contains(out, "liaison") || !strings.Contains(out, "worker") {
+		t.Error("expected output to list agent types")
+	}
+}
+
+func TestHelpAgentListTopics(t *testing.T) {
+	out, err := executeCmd(t, "help", "worker")
+	if err != nil {
+		t.Fatalf("help worker failed: %v", err)
+	}
+	if !strings.Contains(out, "startup") || !strings.Contains(out, "task-done") {
+		t.Error("expected output to list worker topics")
+	}
+}
+
+func TestHelpAgentShowTopic(t *testing.T) {
+	out, err := executeCmd(t, "help", "worker", "startup")
+	if err != nil {
+		t.Fatalf("help worker startup failed: %v", err)
+	}
+	if !strings.Contains(out, "Worker: Startup") {
+		t.Error("expected output to contain topic content")
+	}
+}
+
+func TestHelpAgentUnknownType(t *testing.T) {
+	_, err := executeCmd(t, "help", "badtype")
+	if err == nil {
+		t.Error("expected error for unknown agent type")
+	}
+}
+
+func TestHelpAgentUnknownTopic(t *testing.T) {
+	_, err := executeCmd(t, "help", "worker", "nonexistent")
+	if err == nil {
+		t.Error("expected error for unknown topic")
+	}
 }
 
 func TestLogTailFlag(t *testing.T) {
