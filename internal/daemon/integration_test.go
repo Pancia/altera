@@ -9,9 +9,11 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/anthropics/altera/internal/agent"
 	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/task"
@@ -350,6 +352,28 @@ func TestIntegration_MaxWorkersLimit(t *testing.T) {
 
 	d := startDaemon(t, root, mockScript)
 
+	// Sample active worker count in background to track max concurrency.
+	var maxWorkers int64
+	stopSampling := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopSampling:
+				return
+			case <-ticker.C:
+				count, _ := d.agents.CountByRole(agent.RoleWorker)
+				for {
+					cur := atomic.LoadInt64(&maxWorkers)
+					if int64(count) <= cur || atomic.CompareAndSwapInt64(&maxWorkers, cur, int64(count)) {
+						break
+					}
+				}
+			}
+		}
+	}()
+
 	for i := 1; i <= 4; i++ {
 		id := fmt.Sprintf("t-max%02d", i)
 		tk := &task.Task{
@@ -373,6 +397,15 @@ func TestIntegration_MaxWorkersLimit(t *testing.T) {
 	}
 
 	waitForMergeQueueEmpty(t, d.altDir, 30*time.Second)
+
+	close(stopSampling)
+	observed := atomic.LoadInt64(&maxWorkers)
+	if observed > 2 {
+		t.Errorf("max concurrent workers = %d, want <= 2", observed)
+	}
+	if observed < 2 {
+		t.Errorf("max concurrent workers = %d, expected to reach 2 (constraint not exercised)", observed)
+	}
 }
 
 // --- Test 5: Merge conflict ---
@@ -427,8 +460,81 @@ func TestIntegration_MergeConflict(t *testing.T) {
 		t.Errorf("MergeConflict events = %d, want 1", conflictCount)
 	}
 
+	// Verify MergeConflict event contains conflict file paths.
+	for _, e := range evts {
+		if e.Type == events.MergeConflict {
+			conflictData, ok := e.Data["conflicts"]
+			if !ok {
+				t.Error("MergeConflict event missing 'conflicts' data")
+				break
+			}
+			// After JSON round-trip, []string becomes []any.
+			conflictList, ok := conflictData.([]any)
+			if !ok {
+				t.Errorf("conflicts data type = %T, want []any", conflictData)
+				break
+			}
+			found := false
+			for _, c := range conflictList {
+				if s, ok := c.(string); ok && s == "main.go" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("conflicts = %v, want to contain \"main.go\"", conflictList)
+			}
+			break
+		}
+	}
+
+	// Verify a resolver agent was spawned (or attempted).
+	resolvers, _ := d.agents.ListByRole(agent.RoleResolver)
+	if len(resolvers) < 1 {
+		t.Error("expected at least 1 resolver agent to be spawned")
+	} else {
+		hasConflictTask := false
+		for _, r := range resolvers {
+			if r.CurrentTask == "t-conf01" || r.CurrentTask == "t-conf02" {
+				hasConflictTask = true
+				break
+			}
+		}
+		if !hasConflictTask {
+			t.Errorf("resolver agents %v not assigned to a conflicting task", resolvers)
+		}
+	}
+
+	// Verify the resolver's branch still exists (preserved for re-merge).
+	cmd := exec.Command("git", "branch", "--list", "alt/resolve-t-conf*")
+	cmd.Dir = root
+	branchOut, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git branch --list: %v", err)
+	}
+	branches := strings.TrimSpace(string(branchOut))
+	if branches == "" {
+		t.Error("expected at least one alt/resolve-t-conf* branch to still exist after resolver spawn")
+	}
+
+	// Verify both tasks remain status=done (not incorrectly reclaimed).
+	tk1Done, err := d.tasks.Get("t-conf01")
+	if err != nil {
+		t.Fatalf("get t-conf01: %v", err)
+	}
+	tk2Done, err := d.tasks.Get("t-conf02")
+	if err != nil {
+		t.Fatalf("get t-conf02: %v", err)
+	}
+	if tk1Done.Status != task.StatusDone {
+		t.Errorf("t-conf01 status = %s, want done", tk1Done.Status)
+	}
+	if tk2Done.Status != task.StatusDone {
+		t.Errorf("t-conf02 status = %s, want done", tk2Done.Status)
+	}
+
 	// Repo should be clean (conflict was aborted).
-	cmd := exec.Command("git", "status", "--porcelain")
+	cmd = exec.Command("git", "status", "--porcelain")
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {

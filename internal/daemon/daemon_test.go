@@ -1649,15 +1649,15 @@ func TestLoadConflictContext(t *testing.T) {
 		Worktree: worktreeDir,
 	}
 
-	conflicts, err := d.loadConflictContext(a)
+	conflictCtx, err := d.loadConflictContext(a)
 	if err != nil {
 		t.Fatalf("loadConflictContext: %v", err)
 	}
-	if len(conflicts) != 2 {
-		t.Fatalf("conflicts = %d, want 2", len(conflicts))
+	if len(conflictCtx.Conflicts) != 2 {
+		t.Fatalf("conflicts = %d, want 2", len(conflictCtx.Conflicts))
 	}
-	if conflicts[0].Path != "file1.go" {
-		t.Errorf("conflict[0].Path = %q, want %q", conflicts[0].Path, "file1.go")
+	if conflictCtx.Conflicts[0].Path != "file1.go" {
+		t.Errorf("conflict[0].Path = %q, want %q", conflictCtx.Conflicts[0].Path, "file1.go")
 	}
 }
 

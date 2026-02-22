@@ -32,6 +32,7 @@ type ConflictContext struct {
 	BaseBranch      string               `json:"base_branch"`
 	Conflicts       []merge.ConflictInfo `json:"conflicts"`
 	TaskDescription string               `json:"task_description"`
+	ResolveAttempt  int                  `json:"resolve_attempt,omitempty"`
 }
 
 // Manager handles spawning, detecting resolution, and cleaning up resolvers.
@@ -202,7 +203,11 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 		_ = tmux.StartLogging(sessionName, logPath)
 	}
 
-	// 6. Create agent record.
+	// 6. Capture the pane PID (same pattern as daemon.spawnWorker).
+	time.Sleep(500 * time.Millisecond)
+	panePID, _ := tmux.PanePID(sessionName)
+
+	// 7. Create agent record.
 	now := time.Now()
 	a := &agent.Agent{
 		ID:          id,
@@ -212,6 +217,7 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 		Worktree:    worktreePath,
 		SessionDir:  sessionDir,
 		TmuxSession: sessionName,
+		PID:         panePID,
 		Heartbeat:   now,
 		StartedAt:   now,
 	}
@@ -276,10 +282,13 @@ func hasConflictMarkers(path string) bool {
 		strings.Contains(content, ">>>>>>>")
 }
 
-// CleanupResolver tears down a resolver agent:
+// CleanupResolver tears down a resolver agent but preserves the resolver
+// branch so the merge queue can use it. Call CleanupResolverBranch after
+// the re-merge succeeds to delete the branch.
+//
 //  1. Copy JSONL transcript to .alt/logs/
 //  2. Kill tmux session
-//  3. Delete git worktree
+//  3. Delete git worktree (but NOT the branch)
 //  4. Archive agent record (set status=dead)
 func (m *Manager) CleanupResolver(a *agent.Agent) error {
 	var errs []string
@@ -294,7 +303,7 @@ func (m *Manager) CleanupResolver(a *agent.Agent) error {
 		}
 	}
 
-	// 2. Delete git worktree.
+	// 3. Delete git worktree (branch preserved for re-merge).
 	if a.Worktree != "" {
 		altDir := filepath.Join(m.projectRoot, config.DirName)
 		cfg, err := config.Load(altDir)
@@ -308,16 +317,10 @@ func (m *Manager) CleanupResolver(a *agent.Agent) error {
 			if err := git.DeleteWorktree(repoPath, a.Worktree); err != nil {
 				errs = append(errs, fmt.Sprintf("delete worktree: %v", err))
 			}
-			branchName := "alt/resolve-" + a.CurrentTask
-			if a.CurrentTask != "" {
-				if err := git.DeleteBranch(repoPath, branchName); err != nil {
-					errs = append(errs, fmt.Sprintf("delete branch: %v", err))
-				}
-			}
 		}
 	}
 
-	// 3. Archive agent record (set status=dead).
+	// 4. Archive agent record (set status=dead).
 	a.Status = agent.StatusDead
 	if err := m.agents.Update(a); err != nil {
 		errs = append(errs, fmt.Sprintf("update agent status: %v", err))
@@ -335,6 +338,22 @@ func (m *Manager) CleanupResolver(a *agent.Agent) error {
 		return fmt.Errorf("cleanup errors: %s", strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// CleanupResolverBranch deletes the resolver's git branch. Call this after
+// the re-merge has succeeded.
+func (m *Manager) CleanupResolverBranch(taskID string) error {
+	branchName := "alt/resolve-" + taskID
+	altDir := filepath.Join(m.projectRoot, config.DirName)
+	cfg, err := config.Load(altDir)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	repoPath := cfg.RepoPath
+	if repoPath == "" {
+		repoPath = m.projectRoot
+	}
+	return git.DeleteBranch(repoPath, branchName)
 }
 
 // ListResolvers returns all resolver agents sorted by ID.
