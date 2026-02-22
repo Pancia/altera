@@ -650,7 +650,7 @@ func (d *Daemon) assignTasks(tickEvents *[]events.Event) {
 }
 
 // spawnWorker creates a new worker agent for the given task. It creates a
-// git branch and worktree, writes task.json / CLAUDE.md / .claude/settings.json,
+// git branch and worktree, writes task.json / .claude/settings.json,
 // starts Claude Code in a tmux session, assigns the task, and registers the agent.
 func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	agentID, err := generateAgentID()
@@ -689,12 +689,6 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		return "", fmt.Errorf("write task.json: %w", err)
 	}
 
-	// Write CLAUDE.md with worker system prompt.
-	if err := writeWorkerClaudeMD(worktreePath, t, agentID); err != nil {
-		cleanupGit()
-		return "", fmt.Errorf("write CLAUDE.md: %w", err)
-	}
-
 	// Write .claude/settings.json with heartbeat hooks.
 	if err := writeWorkerClaudeSettings(worktreePath, agentID); err != nil {
 		cleanupGit()
@@ -711,7 +705,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 	// The positional argument starts an interactive session with that first message,
 	// so Claude begins working immediately instead of sitting idle.
 	initialPrompt := fmt.Sprintf(
-		"Read CLAUDE.md and task.json, then implement the task. When finished, run: alt task-done %s %s",
+		"Read task.json, then run alt help worker startup for full instructions. When finished, run: alt task-done %s %s",
 		t.ID, agentID,
 	)
 	claudeCmd := fmt.Sprintf("cd %s && exec claude --dangerously-skip-permissions %q", worktreePath, initialPrompt)
@@ -1338,19 +1332,6 @@ func writeWorkerTaskJSON(worktreePath string, t *task.Task) error {
 	}
 	data = append(data, '\n')
 	return os.WriteFile(filepath.Join(worktreePath, "task.json"), data, 0o644)
-}
-
-// writeWorkerClaudeMD writes CLAUDE.md with a minimal worker bootstrap prompt.
-func writeWorkerClaudeMD(worktreePath string, t *task.Task, agentID string) error {
-	prompt := fmt.Sprintf(`# Worker Agent: %s
-
-- **Task ID**: %s
-- **Title**: %s
-
-Run `+"`alt help worker startup`"+` for full instructions.
-`, agentID, t.ID, t.Title)
-
-	return os.WriteFile(filepath.Join(worktreePath, "CLAUDE.md"), []byte(prompt), 0o644)
 }
 
 // writeWorkerClaudeSettings writes .claude/settings.json with heartbeat hooks.

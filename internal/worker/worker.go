@@ -84,9 +84,8 @@ func workerID(num int) string {
 //  2. Set git author: alt-worker-{num} <worker-{num}@altera.local>
 //  3. Place task.json in worktree root with task details
 //  4. Generate .claude/settings.json with hooks
-//  5. Write CLAUDE.md with worker system prompt
-//  6. Start Claude Code in tmux session (alt-worker-{id})
-//  7. Create agent record in .alt/agents/
+//  5. Start Claude Code in tmux session (alt-worker-{id})
+//  6. Create agent record in .alt/agents/
 func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error) {
 	altDir := filepath.Join(m.projectRoot, config.DirName)
 	rc, err := config.LoadRig(altDir, rigName)
@@ -143,13 +142,7 @@ func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error
 		return nil, fmt.Errorf("writing claude settings: %w", err)
 	}
 
-	// 5. Write CLAUDE.md with worker system prompt.
-	if err := writeClaudeMD(worktreePath, t, id, rigName); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("writing CLAUDE.md: %w", err)
-	}
-
-	// 6. Start Claude Code in tmux session.
+	// 5. Start Claude Code in tmux session.
 	sessionName := tmux.SessionName("worker", id)
 	if err := tmux.CreateSession(sessionName); err != nil {
 		cleanup()
@@ -157,7 +150,7 @@ func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error
 	}
 
 	initialPrompt := fmt.Sprintf(
-		"Read CLAUDE.md and task.json, then implement the task. When finished, run: alt task-done %s %s",
+		"Read task.json, then run alt help worker startup for full instructions. When finished, run: alt task-done %s %s",
 		t.ID, id,
 	)
 	claudeCmd := fmt.Sprintf("cd %s && ALT_AGENT_ID=%s claude --dangerously-skip-permissions %q", worktreePath, id, initialPrompt)
@@ -167,7 +160,7 @@ func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error
 		return nil, fmt.Errorf("starting claude code: %w", err)
 	}
 
-	// 7. Create agent record.
+	// 6. Create agent record.
 	now := time.Now()
 	a := &agent.Agent{
 		ID:          id,
@@ -334,20 +327,3 @@ func writeClaudeSettings(worktreePath, agentID string) error {
 	return os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0o644)
 }
 
-// WorkerPrompt generates a minimal CLAUDE.md bootstrap prompt for a worker agent.
-func WorkerPrompt(t *task.Task, agentID, rigName string) string {
-	return fmt.Sprintf(`# Worker Agent: %s
-
-- **Task ID**: %s
-- **Title**: %s
-- **Rig**: %s
-
-Run `+"`alt help worker startup`"+` for full instructions.
-`, agentID, t.ID, t.Title, rigName)
-}
-
-// writeClaudeMD writes CLAUDE.md with the worker system prompt.
-func writeClaudeMD(worktreePath string, t *task.Task, agentID, rigName string) error {
-	content := WorkerPrompt(t, agentID, rigName)
-	return os.WriteFile(filepath.Join(worktreePath, "CLAUDE.md"), []byte(content), 0o644)
-}

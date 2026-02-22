@@ -243,50 +243,6 @@ func TestWriteClaudeSettings(t *testing.T) {
 	}
 }
 
-func TestWriteClaudeMD(t *testing.T) {
-	dir := t.TempDir()
-	tk := sampleTask()
-
-	if err := writeClaudeMD(dir, tk, "worker-01", "test-rig"); err != nil {
-		t.Fatalf("writeClaudeMD: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-
-	content := string(data)
-	for _, want := range []string{
-		"worker-01",
-		"t-abc123",
-		"Test task",
-		"test-rig",
-		"alt help worker startup",
-	} {
-		if !contains(content, want) {
-			t.Errorf("CLAUDE.md missing %q", want)
-		}
-	}
-}
-
-func TestWorkerPrompt(t *testing.T) {
-	tk := sampleTask()
-	prompt := WorkerPrompt(tk, "worker-05", "my-rig")
-
-	for _, want := range []string{
-		"worker-05",
-		"t-abc123",
-		"Test task",
-		"my-rig",
-		"alt help worker startup",
-	} {
-		if !contains(prompt, want) {
-			t.Errorf("prompt missing %q", want)
-		}
-	}
-}
-
 func TestSpawnWorker(t *testing.T) {
 	if _, err := tmux.ListSessions(); err != nil {
 		t.Skip("tmux not available")
@@ -348,11 +304,6 @@ func TestSpawnWorker(t *testing.T) {
 		if err := json.Unmarshal(settingsData, &settings); err != nil {
 			t.Errorf("invalid settings.json: %v", err)
 		}
-	}
-
-	// Verify CLAUDE.md in worktree.
-	if _, err := os.Stat(filepath.Join(a.Worktree, "CLAUDE.md")); err != nil {
-		t.Errorf("CLAUDE.md not found: %v", err)
 	}
 
 	// Verify tmux session exists.

@@ -95,9 +95,8 @@ func resolverID(num int) string {
 //  2. Set git author
 //  3. Place conflict-context.json with conflict details
 //  4. Generate .claude/settings.json with heartbeat hook
-//  5. Write CLAUDE.md with resolver system prompt
-//  6. Start Claude Code in tmux session (alt-resolver-{id})
-//  7. Create agent record in .alt/agents/
+//  5. Start Claude Code in tmux session (alt-resolver-{id})
+//  6. Create agent record in .alt/agents/
 func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 	altDir := filepath.Join(m.projectRoot, config.DirName)
 	rc, err := config.LoadRig(altDir, ctx.RigName)
@@ -170,27 +169,25 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 		return nil, fmt.Errorf("writing claude settings: %w", err)
 	}
 
-	// 5. Write CLAUDE.md with resolver system prompt.
-	if err := writeClaudeMD(worktreePath, ctx, id); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("writing CLAUDE.md: %w", err)
-	}
-
-	// 6. Start Claude Code in tmux session.
+	// 5. Start Claude Code in tmux session.
 	sessionName := tmux.SessionName("resolver", id)
 	if err := tmux.CreateSession(sessionName); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", worktreePath)
+	initialPrompt := fmt.Sprintf(
+		"Read conflict-context.json, then resolve all merge conflicts. When done, commit and exit. Agent ID: %s, Task: %s",
+		id, ctx.TaskID,
+	)
+	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions %q", worktreePath, initialPrompt)
 	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
 		_ = tmux.KillSession(sessionName)
 		cleanup()
 		return nil, fmt.Errorf("starting claude code: %w", err)
 	}
 
-	// 7. Create agent record.
+	// 6. Create agent record.
 	now := time.Now()
 	a := &agent.Agent{
 		ID:          id,
@@ -390,67 +387,3 @@ func writeClaudeSettings(worktreePath, agentID string) error {
 	return os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0o644)
 }
 
-// ResolverPrompt generates the CLAUDE.md system prompt for a resolver agent.
-func ResolverPrompt(ctx ConflictContext, agentID string) string {
-	// Build the list of conflicting files.
-	var fileList strings.Builder
-	for _, c := range ctx.Conflicts {
-		fmt.Fprintf(&fileList, "- `%s` (%d conflict regions)\n", c.Path, len(c.Markers))
-	}
-
-	return fmt.Sprintf(`# Resolver Agent: %s
-
-You are a resolver agent in the Altera multi-agent system. Your sole job is to
-resolve merge conflicts in this worktree, then commit the resolution and exit.
-
-## Conflict Context
-
-- **Task ID**: %s
-- **Branch being merged**: %s
-- **Base branch**: %s
-- **Rig**: %s
-
-## Task Description
-
-%s
-
-## Conflicting Files
-
-%s
-## Instructions
-
-1. Read conflict-context.json in your worktree root for full conflict details
-2. Examine each conflicting file — look for <<<<<<< / ======= / >>>>>>> markers
-3. Understand both sides of each conflict:
-   - **Ours** (between <<<<<<< and =======): changes from the base branch
-   - **Theirs** (between ======= and >>>>>>>): changes from the task branch
-4. Resolve each conflict by choosing the correct combination of changes
-5. Remove ALL conflict markers — no <<<<<<< / ======= / >>>>>>> may remain
-6. Stage your resolved files: git add <resolved-files>
-7. Commit with message: "resolve: merge conflicts for %s"
-8. Verify no conflict markers remain in any file
-9. Exit when done
-
-## Rules
-
-- Resolve conflicts to preserve the intent of BOTH sides where possible
-- If the changes are incompatible, prefer the task branch changes (theirs)
-- Do NOT modify files that are not in conflict
-- Do NOT add new features or refactor — only resolve conflicts
-- Commit exactly once with all resolutions
-- After committing, verify with 'git diff --check' that no markers remain
-
-## Hooks
-
-Your session is configured with automatic hooks:
-- **Heartbeat**: Sent before each tool use to signal you're alive
-- **Checkpoint**: Sent when you stop to save progress
-`, agentID, ctx.TaskID, ctx.Branch, ctx.BaseBranch, ctx.RigName,
-		ctx.TaskDescription, fileList.String(), ctx.TaskID)
-}
-
-// writeClaudeMD writes CLAUDE.md with the resolver system prompt.
-func writeClaudeMD(worktreePath string, ctx ConflictContext, agentID string) error {
-	content := ResolverPrompt(ctx, agentID)
-	return os.WriteFile(filepath.Join(worktreePath, "CLAUDE.md"), []byte(content), 0o644)
-}

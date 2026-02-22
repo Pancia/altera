@@ -55,36 +55,6 @@ func setupProject(t *testing.T) (projectRoot string, m *Manager) {
 	return projectRoot, mgr
 }
 
-func TestLiaisonPrompt(t *testing.T) {
-	prompt := LiaisonPrompt()
-
-	for _, want := range []string{
-		"Liaison Agent",
-		"alt help liaison startup",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("LiaisonPrompt() missing %q", want)
-		}
-	}
-}
-
-func TestWriteClaudeMD(t *testing.T) {
-	projectRoot, m := setupProject(t)
-
-	if err := m.writeClaudeMD(); err != nil {
-		t.Fatalf("writeClaudeMD: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(projectRoot, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-
-	if !strings.Contains(string(data), "Liaison Agent") {
-		t.Error("CLAUDE.md missing 'Liaison Agent'")
-	}
-}
-
 func TestWriteClaudeSettings(t *testing.T) {
 	projectRoot, m := setupProject(t)
 
@@ -297,12 +267,6 @@ func TestStartLiaison(t *testing.T) {
 	}
 	if a.TmuxSession != SessionName {
 		t.Errorf("agent tmux session = %q, want %q", a.TmuxSession, SessionName)
-	}
-
-	// Verify CLAUDE.md was written.
-	claudeMD := filepath.Join(m.projectRoot, "CLAUDE.md")
-	if _, err := os.Stat(claudeMD); err != nil {
-		t.Errorf("CLAUDE.md not found: %v", err)
 	}
 
 	// Verify .claude/settings.json was written.

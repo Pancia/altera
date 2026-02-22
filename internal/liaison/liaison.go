@@ -58,10 +58,7 @@ func (m *Manager) StartLiaison() error {
 		return fmt.Errorf("liaison session %q already exists (use AttachLiaison to connect)", SessionName)
 	}
 
-	// Write CLAUDE.md and .claude/settings.json to project root.
-	if err := m.writeClaudeMD(); err != nil {
-		return fmt.Errorf("writing CLAUDE.md: %w", err)
-	}
+	// Write .claude/settings.json to project root.
 	if err := m.writeClaudeSettings(); err != nil {
 		return fmt.Errorf("writing settings.json: %w", err)
 	}
@@ -237,21 +234,6 @@ func (m *Manager) writeClaudeSettings() error {
 	}
 	data = append(data, '\n')
 	return os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0o644)
-}
-
-// LiaisonPrompt generates a minimal CLAUDE.md bootstrap prompt for the liaison agent.
-func LiaisonPrompt() string {
-	return `# Liaison Agent
-
-Run ` + "`alt help liaison startup`" + ` for full instructions.
-`
-}
-
-// writeClaudeMD writes CLAUDE.md with the liaison system prompt to the
-// project root.
-func (m *Manager) writeClaudeMD() error {
-	content := LiaisonPrompt()
-	return os.WriteFile(filepath.Join(m.projectRoot, "CLAUDE.md"), []byte(content), 0o644)
 }
 
 // --- Prime helpers ---

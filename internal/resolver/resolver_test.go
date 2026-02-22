@@ -284,52 +284,6 @@ func TestWriteClaudeSettings(t *testing.T) {
 	}
 }
 
-func TestResolverPrompt(t *testing.T) {
-	ctx := sampleConflictContext("feature-conflict")
-	prompt := ResolverPrompt(ctx, "resolver-05")
-
-	for _, want := range []string{
-		"resolver-05",
-		"t-abc123",
-		"feature-conflict",
-		"main",
-		"test-rig",
-		"Implement the widget feature",
-		"hello.txt",
-		"resolve merge conflicts",
-	} {
-		if !contains(prompt, want) {
-			t.Errorf("prompt missing %q", want)
-		}
-	}
-}
-
-func TestWriteClaudeMD(t *testing.T) {
-	dir := t.TempDir()
-	ctx := sampleConflictContext("feature-conflict")
-
-	if err := writeClaudeMD(dir, ctx, "resolver-01"); err != nil {
-		t.Fatalf("writeClaudeMD: %v", err)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-
-	content := string(data)
-	for _, want := range []string{
-		"resolver-01",
-		"t-abc123",
-		"test-rig",
-		"Implement the widget feature",
-	} {
-		if !contains(content, want) {
-			t.Errorf("CLAUDE.md missing %q", want)
-		}
-	}
-}
-
 func TestHasConflictMarkers(t *testing.T) {
 	dir := t.TempDir()
 
@@ -530,11 +484,6 @@ func TestSpawnResolver(t *testing.T) {
 		if err := json.Unmarshal(settingsData, &settings); err != nil {
 			t.Errorf("invalid settings.json: %v", err)
 		}
-	}
-
-	// Verify CLAUDE.md in worktree.
-	if _, err := os.Stat(filepath.Join(a.Worktree, "CLAUDE.md")); err != nil {
-		t.Errorf("CLAUDE.md not found: %v", err)
 	}
 
 	// Verify conflict markers are present in worktree (merge was not aborted).
