@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/anthropics/altera/internal/agent"
-	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/daemon"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/git"
@@ -31,7 +30,7 @@ func init() {
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show project status overview",
-	Long:  `Displays a formatted table of tasks, agents, rigs, worktrees, branches, tmux sessions, merge queue, daemon status, and recent events.`,
+	Long:  `Displays a formatted table of tasks, agents, worktrees, branches, tmux sessions, merge queue, daemon status, and recent events.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {
@@ -89,10 +88,10 @@ func runStatus(root, altDir string) error {
 	}
 
 	fmt.Fprintln(w, "TASKS")
-	fmt.Fprintln(w, "ID\tSTATUS\tASSIGNED\tRIG\tTITLE")
+	fmt.Fprintln(w, "ID\tSTATUS\tASSIGNED\tTITLE")
 	for _, t := range tasks {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			t.ID, t.Status, t.AssignedTo, t.Rig, t.Title)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			t.ID, t.Status, t.AssignedTo, t.Title)
 	}
 	if len(tasks) == 0 {
 		fmt.Fprintln(w, "(none)")
@@ -113,32 +112,15 @@ func runStatus(root, altDir string) error {
 	}
 
 	fmt.Fprintln(w, "AGENTS")
-	fmt.Fprintln(w, "ID\tROLE\tSTATUS\tRIG\tTASK")
+	fmt.Fprintln(w, "ID\tROLE\tSTATUS\tTASK")
 	for _, a := range agents {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			a.ID, a.Role, a.Status, a.Rig, a.CurrentTask)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			a.ID, a.Role, a.Status, a.CurrentTask)
 	}
 	if len(agents) == 0 {
 		fmt.Fprintln(w, "(none)")
 	}
 	w.Flush()
-
-	fmt.Println()
-
-	// Rigs section
-	rigs, err := config.ListRigs(altDir)
-	if err != nil {
-		return fmt.Errorf("listing rigs: %w", err)
-	}
-
-	fmt.Println("RIGS")
-	if len(rigs) == 0 {
-		fmt.Println("(none)")
-	} else {
-		for _, name := range rigs {
-			fmt.Printf("  %s\n", name)
-		}
-	}
 
 	fmt.Println()
 

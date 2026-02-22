@@ -32,7 +32,6 @@ const (
 type Agent struct {
 	ID           string    `json:"id"`
 	Role         Role      `json:"role"`
-	Rig          string    `json:"rig"`
 	Status       Status    `json:"status"`
 	CurrentTask  string    `json:"current_task,omitempty"`
 	Worktree     string    `json:"worktree,omitempty"`

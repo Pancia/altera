@@ -1,7 +1,7 @@
 // Package config handles loading and saving Altera configuration from the
 // .alt/ directory. It provides path resolution (walking up from cwd to find
-// .alt/), CRUD operations on the root config and per-rig configs, and atomic
-// file writes to prevent corruption.
+// .alt/), CRUD operations on the root config, and atomic file writes to
+// prevent corruption.
 package config
 
 import (
@@ -36,23 +36,18 @@ func (c Constraints) Validate() error {
 	return nil
 }
 
-// RigConfig holds per-rig settings stored in .alt/rigs/{name}/config.json.
-type RigConfig struct {
-	RepoPath      string `json:"repo_path"`
-	DefaultBranch string `json:"default_branch"`
-	TestCommand   string `json:"test_command"`
-}
-
 // Config is the root configuration stored in .alt/config.json.
 type Config struct {
-	Rigs        map[string]RigConfig `json:"rigs"`
-	Constraints Constraints          `json:"constraints"`
+	RepoPath      string      `json:"repo_path"`
+	DefaultBranch string      `json:"default_branch"`
+	TestCommand   string      `json:"test_command"`
+	Constraints   Constraints `json:"constraints"`
 }
 
 // NewConfig returns a Config with sensible defaults.
 func NewConfig() Config {
 	return Config{
-		Rigs: make(map[string]RigConfig),
+		DefaultBranch: "main",
 		Constraints: Constraints{
 			BudgetCeiling: 100.0,
 			MaxWorkers:    4,
@@ -94,7 +89,6 @@ func EnsureDir(parentDir string) (string, error) {
 		filepath.Join(altDir, "messages"),
 		filepath.Join(altDir, "messages", "archive"),
 		filepath.Join(altDir, "merge-queue"),
-		filepath.Join(altDir, "rigs"),
 		filepath.Join(altDir, "worktrees"),
 		filepath.Join(altDir, "logs"),
 	}
@@ -144,9 +138,6 @@ func Load(altDir string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parsing config: %w", err)
 	}
-	if cfg.Rigs == nil {
-		cfg.Rigs = make(map[string]RigConfig)
-	}
 	return cfg, nil
 }
 
@@ -155,66 +146,6 @@ func Load(altDir string) (Config, error) {
 func Save(altDir string, cfg Config) error {
 	path := filepath.Join(altDir, "config.json")
 	return atomicWriteJSON(path, cfg)
-}
-
-// LoadRig reads the per-rig config from .alt/rigs/{name}/config.json.
-func LoadRig(altDir, name string) (RigConfig, error) {
-	path := rigConfigPath(altDir, name)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return RigConfig{}, fmt.Errorf("rig %q not found", name)
-		}
-		return RigConfig{}, fmt.Errorf("reading rig config: %w", err)
-	}
-	var rc RigConfig
-	if err := json.Unmarshal(data, &rc); err != nil {
-		return RigConfig{}, fmt.Errorf("parsing rig config: %w", err)
-	}
-	return rc, nil
-}
-
-// SaveRig writes a per-rig config to .alt/rigs/{name}/config.json using an
-// atomic temp+rename pattern. Creates the rig directory if needed.
-func SaveRig(altDir, name string, rc RigConfig) error {
-	rigDir := filepath.Join(altDir, "rigs", name)
-	if err := os.MkdirAll(rigDir, 0o755); err != nil {
-		return fmt.Errorf("creating rig directory: %w", err)
-	}
-	return atomicWriteJSON(rigConfigPath(altDir, name), rc)
-}
-
-// DeleteRig removes a rig's config directory from .alt/rigs/{name}/.
-func DeleteRig(altDir, name string) error {
-	rigDir := filepath.Join(altDir, "rigs", name)
-	if err := os.RemoveAll(rigDir); err != nil {
-		return fmt.Errorf("deleting rig %q: %w", name, err)
-	}
-	return nil
-}
-
-// ListRigs returns the names of all rigs that have config directories.
-func ListRigs(altDir string) ([]string, error) {
-	rigsDir := filepath.Join(altDir, "rigs")
-	entries, err := os.ReadDir(rigsDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("listing rigs: %w", err)
-	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
-		}
-	}
-	return names, nil
-}
-
-// rigConfigPath returns the path to a rig's config.json.
-func rigConfigPath(altDir, name string) string {
-	return filepath.Join(altDir, "rigs", name, "config.json")
 }
 
 // atomicWriteJSON marshals v as indented JSON and writes it atomically using

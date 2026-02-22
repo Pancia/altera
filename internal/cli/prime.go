@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/anthropics/altera/internal/agent"
-	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/liaison"
 	"github.com/anthropics/altera/internal/message"
@@ -172,9 +170,6 @@ func primeWorker(root, altDir, agentID string) error {
 	} else {
 		fmt.Println("No task currently assigned.")
 	}
-	if a.Rig != "" {
-		fmt.Printf("- **Rig**: %s\n", a.Rig)
-	}
 	fmt.Println()
 	fmt.Println("Use `alt help worker startup` for instructions. Use `alt <command> --help` for syntax.")
 	fmt.Println()
@@ -197,19 +192,6 @@ func primeWorker(root, altDir, agentID string) error {
 		fmt.Println()
 		fmt.Println(t.Checkpoint)
 		fmt.Println()
-	}
-
-	// Output rig config if available.
-	if a.Rig != "" {
-		rc, err := config.LoadRig(altDir, a.Rig)
-		if err == nil {
-			data, _ := json.MarshalIndent(rc, "", "  ")
-			fmt.Println("## Rig Configuration")
-			fmt.Println("```json")
-			fmt.Println(string(data))
-			fmt.Println("```")
-			fmt.Println()
-		}
 	}
 
 	return nil

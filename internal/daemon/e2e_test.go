@@ -48,7 +48,7 @@ func main() {
 	altDir := filepath.Join(root, ".alt")
 	for _, sub := range []string{
 		"agents", "tasks", "messages", "messages/archive",
-		"merge-queue", "rigs", "worktrees",
+		"merge-queue", "worktrees",
 	} {
 		if err := os.MkdirAll(filepath.Join(altDir, sub), 0o755); err != nil {
 			t.Fatalf("setup: mkdir %s: %v", sub, err)
@@ -191,7 +191,6 @@ func TestE2E_FullPipeline(t *testing.T) {
 		Title:       "Add greeting feature",
 		Description: "Add a greeting function to the test rig",
 		Status:      task.StatusOpen,
-		Rig:         "test-rig",
 	}
 	if err := d.tasks.Create(tk); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -645,7 +644,6 @@ func TestE2E_BudgetEnforcement(t *testing.T) {
 	// Override config with a very low budget.
 	altDir := filepath.Join(root, ".alt")
 	cfg := config.Config{
-		Rigs: make(map[string]config.RigConfig),
 		Constraints: config.Constraints{
 			BudgetCeiling: 5.0, // Very low.
 			MaxWorkers:    4,
@@ -915,9 +913,9 @@ func TestE2E_FullTick(t *testing.T) {
 
 // --- Test: Merge Conflict Spawns Resolver ---
 //
-// When a merge conflict occurs and a rig is configured, the daemon should
-// attempt to spawn a resolver agent. Since tmux isn't available in tests,
-// this verifies the fallback (message sent to worker) when SpawnResolver fails.
+// When a merge conflict occurs, the daemon should attempt to spawn a resolver
+// agent. Since tmux isn't available in tests, this verifies the fallback
+// (message sent to worker) when SpawnResolver fails.
 
 func TestE2E_MergeConflict_AttemptsResolverSpawn(t *testing.T) {
 	root := setupE2EProject(t)
@@ -932,24 +930,10 @@ func TestE2E_MergeConflict_AttemptsResolverSpawn(t *testing.T) {
 		return fmt.Sprintf("%d", time.Now().Unix()), nil
 	}
 
-	// Set up a rig config so the resolver manager can load it.
-	rigDir := filepath.Join(d.altDir, "rigs", "test-rig")
-	if err := os.MkdirAll(rigDir, 0o755); err != nil {
-		t.Fatalf("mkdir rig dir: %v", err)
-	}
-	rigCfg := config.RigConfig{
-		RepoPath:      root,
-		DefaultBranch: "main",
-	}
-	rigData, _ := json.MarshalIndent(rigCfg, "", "  ")
-	if err := os.WriteFile(filepath.Join(rigDir, "config.json"), rigData, 0o644); err != nil {
-		t.Fatalf("write rig config: %v", err)
-	}
-
 	// Create two tasks that will conflict.
 	tk1 := &task.Task{
 		ID: "t-res01", Title: "Worker 1", Status: task.StatusOpen,
-		Rig: "test-rig", Description: "Change main.go to version A",
+		Description: "Change main.go to version A",
 	}
 	if err := d.tasks.Create(tk1); err != nil {
 		t.Fatalf("create task 1: %v", err)
@@ -960,7 +944,7 @@ func TestE2E_MergeConflict_AttemptsResolverSpawn(t *testing.T) {
 
 	tk2 := &task.Task{
 		ID: "t-res02", Title: "Worker 2", Status: task.StatusOpen,
-		Rig: "test-rig", Description: "Change main.go to version B",
+		Description: "Change main.go to version B",
 	}
 	if err := d.tasks.Create(tk2); err != nil {
 		t.Fatalf("create task 2: %v", err)
@@ -1297,7 +1281,6 @@ func TestE2E_BuildConflictContext_WithConflictMarkers(t *testing.T) {
 		Title:       "Test context build",
 		Description: "Testing conflict context extraction",
 		Status:      task.StatusDone,
-		Rig:         "my-rig",
 		Branch:      "worker/w-bctx01",
 		AssignedTo:  "w-bctx01",
 	}
@@ -1338,9 +1321,6 @@ func TestE2E_BuildConflictContext_WithConflictMarkers(t *testing.T) {
 
 	if ctx.TaskID != "t-bctx01" {
 		t.Errorf("TaskID = %q, want %q", ctx.TaskID, "t-bctx01")
-	}
-	if ctx.RigName != "my-rig" {
-		t.Errorf("RigName = %q, want %q", ctx.RigName, "my-rig")
 	}
 	if ctx.TaskDescription != "Testing conflict context extraction" {
 		t.Errorf("TaskDescription = %q", ctx.TaskDescription)

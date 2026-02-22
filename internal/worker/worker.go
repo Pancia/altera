@@ -79,19 +79,19 @@ func workerID(num int) string {
 	return fmt.Sprintf("worker-%02d", num)
 }
 
-// SpawnWorker creates a new worker for the given task and rig.
+// SpawnWorker creates a new worker for the given task.
 // It performs the following steps:
-//  1. Create git worktree from rig's repo (branch: alt/t-{task.ID})
+//  1. Create git worktree from the configured repo (branch: alt/t-{task.ID})
 //  2. Set git author: alt-worker-{num} <worker-{num}@altera.local>
 //  3. Place task.json in worktree root with task details
 //  4. Generate .claude/settings.json with hooks
 //  5. Start Claude Code in tmux session (alt-worker-{id})
 //  6. Create agent record in .alt/agents/
-func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error) {
+func (m *Manager) SpawnWorker(t *task.Task) (*agent.Agent, error) {
 	altDir := filepath.Join(m.projectRoot, config.DirName)
-	rc, err := config.LoadRig(altDir, rigName)
+	cfg, err := config.Load(altDir)
 	if err != nil {
-		return nil, fmt.Errorf("loading rig config: %w", err)
+		return nil, fmt.Errorf("loading config: %w", err)
 	}
 
 	num, err := m.nextWorkerNum()
@@ -104,23 +104,27 @@ func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error
 	branchName := "alt/t-" + t.ID
 	worktreePath := filepath.Join(m.projectRoot, "worktrees", id)
 
-	baseBranch := rc.DefaultBranch
+	repoPath := cfg.RepoPath
+	if repoPath == "" {
+		repoPath = m.projectRoot
+	}
+	baseBranch := cfg.DefaultBranch
 	if baseBranch == "" {
 		baseBranch = "main"
 	}
-	if err := git.CreateBranch(rc.RepoPath, branchName, baseBranch); err != nil {
+	if err := git.CreateBranch(repoPath, branchName, baseBranch); err != nil {
 		return nil, fmt.Errorf("creating branch: %w", err)
 	}
-	if err := git.CreateWorktree(rc.RepoPath, branchName, worktreePath); err != nil {
+	if err := git.CreateWorktree(repoPath, branchName, worktreePath); err != nil {
 		// Clean up the branch on failure.
-		_ = git.DeleteBranch(rc.RepoPath, branchName)
+		_ = git.DeleteBranch(repoPath, branchName)
 		return nil, fmt.Errorf("creating worktree: %w", err)
 	}
 
 	// From here on, if we fail, we must clean up the worktree and branch.
 	cleanup := func() {
-		_ = git.DeleteWorktree(rc.RepoPath, worktreePath)
-		_ = git.DeleteBranch(rc.RepoPath, branchName)
+		_ = git.DeleteWorktree(repoPath, worktreePath)
+		_ = git.DeleteBranch(repoPath, branchName)
 	}
 
 	// 2. Set git author.
@@ -177,7 +181,6 @@ func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error
 	a := &agent.Agent{
 		ID:          id,
 		Role:        agent.RoleWorker,
-		Rig:         rigName,
 		Status:      agent.StatusActive,
 		CurrentTask: t.ID,
 		Worktree:    worktreePath,
@@ -199,7 +202,6 @@ func (m *Manager) SpawnWorker(t *task.Task, rigName string) (*agent.Agent, error
 		AgentID:   id,
 		TaskID:    t.ID,
 		Data: map[string]any{
-			"rig":      rigName,
 			"worktree": worktreePath,
 			"branch":   branchName,
 		},
@@ -227,19 +229,23 @@ func (m *Manager) CleanupWorker(a *agent.Agent) error {
 	}
 
 	// 2. Delete git worktree.
-	if a.Worktree != "" && a.Rig != "" {
+	if a.Worktree != "" {
 		altDir := filepath.Join(m.projectRoot, config.DirName)
-		rc, err := config.LoadRig(altDir, a.Rig)
+		cfg, err := config.Load(altDir)
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("load rig config: %v", err))
+			errs = append(errs, fmt.Sprintf("load config: %v", err))
 		} else {
-			if err := git.DeleteWorktree(rc.RepoPath, a.Worktree); err != nil {
+			repoPath := cfg.RepoPath
+			if repoPath == "" {
+				repoPath = m.projectRoot
+			}
+			if err := git.DeleteWorktree(repoPath, a.Worktree); err != nil {
 				errs = append(errs, fmt.Sprintf("delete worktree: %v", err))
 			}
 			// Also delete the branch.
 			branchName := "alt/t-" + a.CurrentTask
 			if a.CurrentTask != "" {
-				if err := git.DeleteBranch(rc.RepoPath, branchName); err != nil {
+				if err := git.DeleteBranch(repoPath, branchName); err != nil {
 					errs = append(errs, fmt.Sprintf("delete branch: %v", err))
 				}
 			}

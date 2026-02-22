@@ -129,7 +129,7 @@ func TestPrime_WithState(t *testing.T) {
 
 	// Create some tasks.
 	for _, tk := range []*task.Task{
-		{Title: "Build the widget", Status: task.StatusOpen, Rig: "my-rig"},
+		{Title: "Build the widget", Status: task.StatusOpen},
 		{Title: "Fix the bug", Status: task.StatusInProgress, AssignedTo: "worker-01"},
 	} {
 		if err := m.tasks.Create(tk); err != nil {

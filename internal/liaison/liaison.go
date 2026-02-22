@@ -290,10 +290,7 @@ func (m *Manager) writeTasks(b *strings.Builder) error {
 			if t.AssignedTo != "" {
 				line += fmt.Sprintf(" (assigned: %s)", t.AssignedTo)
 			}
-			if t.Rig != "" {
-				line += fmt.Sprintf(" [rig: %s]", t.Rig)
-			}
-			b.WriteString(line + "\n")
+				b.WriteString(line + "\n")
 		}
 		b.WriteString("\n")
 	}

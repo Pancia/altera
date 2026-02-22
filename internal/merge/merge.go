@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/git"
 	"github.com/anthropics/altera/internal/message"
@@ -71,7 +70,7 @@ func NewPipeline(tasks *task.Store, ev *events.Writer, msgs *message.Store, q *Q
 //   - success: push, emit merge_success, send merge_result message
 //   - conflict: extract conflicts, abort merge, emit merge_conflict
 //   - test failure: revert merge, emit merge_failed, send merge_result message
-func (p *Pipeline) AttemptMerge(taskID string, rig config.RigConfig, worktree string) (*Result, error) {
+func (p *Pipeline) AttemptMerge(taskID string, defaultBranch string, testCommand string, worktree string) (*Result, error) {
 	t, err := p.tasks.Get(taskID)
 	if err != nil {
 		return nil, fmt.Errorf("get task %q: %w", taskID, err)
@@ -135,8 +134,8 @@ func (p *Pipeline) AttemptMerge(taskID string, rig config.RigConfig, worktree st
 	}
 
 	// Merge was clean — run tests if a test command is configured.
-	if rig.TestCommand != "" {
-		testOutput, testErr := runTests(worktree, rig.TestCommand)
+	if testCommand != "" {
+		testOutput, testErr := runTests(worktree, testCommand)
 		if testErr != nil {
 			// Tests failed — revert the merge commit.
 			resetHard(worktree, preHead)
@@ -166,7 +165,7 @@ func (p *Pipeline) AttemptMerge(taskID string, rig config.RigConfig, worktree st
 	}
 
 	// Tests passed (or no test command) — push.
-	if err := git.Push(worktree, "origin", rig.DefaultBranch); err != nil {
+	if err := git.Push(worktree, "origin", defaultBranch); err != nil {
 		return nil, fmt.Errorf("pushing merge: %w", err)
 	}
 

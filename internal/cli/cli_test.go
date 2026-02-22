@@ -31,7 +31,7 @@ func setupProject(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	altDir := filepath.Join(root, ".alt")
-	for _, sub := range []string{"tasks", "agents", "messages", "messages/archive", "rigs"} {
+	for _, sub := range []string{"tasks", "agents", "messages", "messages/archive"} {
 		if err := os.MkdirAll(filepath.Join(altDir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +59,7 @@ func TestRootCommand(t *testing.T) {
 
 func TestSubcommandRegistration(t *testing.T) {
 	expected := []string{
-		"status", "task", "log", "rig", "work",
+		"status", "task", "log", "work",
 		"daemon", "heartbeat", "checkpoint", "liaison",
 		"worker", "session", "prime", "setup", "help",
 		"task-done",
@@ -136,32 +136,12 @@ func TestLiaisonSubcommands(t *testing.T) {
 	t.Fatal("liaison command not found")
 }
 
-func TestRigSubcommands(t *testing.T) {
-	for _, c := range rootCmd.Commands() {
-		if c.Name() == "rig" {
-			expected := []string{"add", "list"}
-			subs := c.Commands()
-			names := make(map[string]bool)
-			for _, s := range subs {
-				names[s.Name()] = true
-			}
-			for _, name := range expected {
-				if !names[name] {
-					t.Errorf("expected rig subcommand %q not found", name)
-				}
-			}
-			return
-		}
-	}
-	t.Fatal("rig command not found")
-}
-
 func TestTaskListFlags(t *testing.T) {
 	for _, c := range rootCmd.Commands() {
 		if c.Name() == "task" {
 			for _, s := range c.Commands() {
 				if s.Name() == "list" {
-					for _, flag := range []string{"status", "rig", "assignee", "tag"} {
+					for _, flag := range []string{"status", "assignee", "tag"} {
 						f := s.Flags().Lookup(flag)
 						if f == nil {
 							t.Errorf("task list missing --%s flag", flag)
@@ -287,63 +267,12 @@ func TestLiaisonCheckMessagesNoArg(t *testing.T) {
 	}
 }
 
-func TestRigAddRequiresName(t *testing.T) {
-	setupProject(t)
-	_, err := executeCmd(t, "rig", "add")
-	if err == nil {
-		t.Error("expected error when no rig name provided")
-	}
-}
-
-func TestRigAddAndList(t *testing.T) {
-	root := setupProject(t)
-
-	// Write a minimal config so rig add can load it.
-	cfgPath := filepath.Join(root, ".alt", "config.json")
-	cfgData, _ := json.Marshal(map[string]any{
-		"rigs":        map[string]any{},
-		"constraints": map[string]any{},
-	})
-	if err := os.WriteFile(cfgPath, cfgData, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := executeCmd(t, "rig", "add", "myrig", "--repo", "/tmp/repo", "--branch", "develop")
-	if err != nil {
-		t.Fatalf("rig add failed: %v", err)
-	}
-
-	_, err = executeCmd(t, "rig", "list")
-	if err != nil {
-		t.Fatalf("rig list failed: %v", err)
-	}
-}
-
 func TestStatusCommand(t *testing.T) {
 	setupProject(t)
 	_, err := executeCmd(t, "status")
 	if err != nil {
 		t.Fatalf("status command failed: %v", err)
 	}
-}
-
-func TestRigAddFlags(t *testing.T) {
-	for _, c := range rootCmd.Commands() {
-		if c.Name() == "rig" {
-			for _, s := range c.Commands() {
-				if s.Name() == "add" {
-					for _, flag := range []string{"repo", "branch", "test"} {
-						f := s.Flags().Lookup(flag)
-						if f == nil {
-							t.Errorf("rig add missing --%s flag", flag)
-						}
-					}
-					return
-				}
-			}
-		}
-	}
-	t.Fatal("rig add command not found")
 }
 
 func TestCheckpointMessageFlag(t *testing.T) {

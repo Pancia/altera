@@ -67,7 +67,6 @@ type Task struct {
 	Status      Status    `json:"status"`
 	AssignedTo  string    `json:"assigned_to,omitempty"`
 	Branch      string    `json:"branch,omitempty"`
-	Rig         string    `json:"rig,omitempty"`
 	CreatedBy   string    `json:"created_by,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -189,7 +188,6 @@ func (s *Store) Delete(id string) error {
 // Filter specifies criteria for listing tasks.
 type Filter struct {
 	Status     Status
-	Rig        string
 	AssignedTo string
 	Tag        string
 }
@@ -297,9 +295,6 @@ func (s *Store) writeTask(t *Task) error {
 
 func matchesFilter(t *Task, f Filter) bool {
 	if f.Status != "" && t.Status != f.Status {
-		return false
-	}
-	if f.Rig != "" && t.Rig != f.Rig {
 		return false
 	}
 	if f.AssignedTo != "" && t.AssignedTo != f.AssignedTo {

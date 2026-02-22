@@ -16,7 +16,7 @@ When you start as a liaison agent:
 
 1. **Read the current state**: `alt status`
 2. **Check for pending messages**: `alt message read`
-3. **Understand the project context** — what rig are you managing?
+3. **Understand the project context**
 4. **Be ready to translate** human goals into structured tasks
 
 ## Available Commands
@@ -43,7 +43,7 @@ Use the `alt` CLI to manage the system:
 For more details: `alt help liaison debugging`
 
 ### Status & Monitoring
-- Full status: `alt status` (tasks, agents, rigs, worktrees, branches, sessions, merge queue, daemon, recent events)
+- Full status: `alt status` (tasks, agents, worktrees, branches, sessions, merge queue, daemon, recent events)
 - Live status: `alt status --live`
 
 ### Daemon

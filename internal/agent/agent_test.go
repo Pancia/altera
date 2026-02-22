@@ -22,7 +22,6 @@ func sampleAgent(id string) *Agent {
 	return &Agent{
 		ID:        id,
 		Role:      RoleWorker,
-		Rig:       "rig-1",
 		Status:    StatusActive,
 		Heartbeat: now,
 		StartedAt: now,

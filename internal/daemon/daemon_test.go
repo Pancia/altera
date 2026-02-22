@@ -24,7 +24,7 @@ func setupTestProject(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	altDir := filepath.Join(root, ".alt")
-	for _, sub := range []string{"agents", "tasks", "messages", "messages/archive", "merge-queue", "rigs"} {
+	for _, sub := range []string{"agents", "tasks", "messages", "messages/archive", "merge-queue"} {
 		if err := os.MkdirAll(filepath.Join(altDir, sub), 0o755); err != nil {
 			t.Fatalf("setup: mkdir %s: %v", sub, err)
 		}
@@ -1475,13 +1475,12 @@ func TestBuildConflictContext(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// Create a task with rig and description.
+	// Create a task with description.
 	tk := &task.Task{
 		ID:          "t-ctx01",
 		Title:       "Test task",
 		Description: "Implement feature X",
 		Status:      task.StatusDone,
-		Rig:         "test-rig",
 		Branch:      "worker/w-ctx01",
 		AssignedTo:  "w-ctx01",
 	}
@@ -1507,9 +1506,6 @@ func TestBuildConflictContext(t *testing.T) {
 	if ctx.Branch != "worker/w-ctx01" {
 		t.Errorf("Branch = %q, want %q", ctx.Branch, "worker/w-ctx01")
 	}
-	if ctx.RigName != "test-rig" {
-		t.Errorf("RigName = %q, want %q", ctx.RigName, "test-rig")
-	}
 	if ctx.TaskDescription != "Implement feature X" {
 		t.Errorf("TaskDescription = %q, want %q", ctx.TaskDescription, "Implement feature X")
 	}
@@ -1533,12 +1529,9 @@ func TestBuildConflictContext_MissingTask(t *testing.T) {
 
 	ctx := d.buildConflictContext(item, nil)
 
-	// Should still have item fields, but empty rig/description.
+	// Should still have item fields, but empty description.
 	if ctx.TaskID != "t-missing" {
 		t.Errorf("TaskID = %q, want %q", ctx.TaskID, "t-missing")
-	}
-	if ctx.RigName != "" {
-		t.Errorf("RigName = %q, want empty", ctx.RigName)
 	}
 	if ctx.TaskDescription != "" {
 		t.Errorf("TaskDescription = %q, want empty", ctx.TaskDescription)

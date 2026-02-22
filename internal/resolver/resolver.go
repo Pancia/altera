@@ -30,7 +30,6 @@ type ConflictContext struct {
 	TaskID          string               `json:"task_id"`
 	Branch          string               `json:"branch"`
 	BaseBranch      string               `json:"base_branch"`
-	RigName         string               `json:"rig_name"`
 	Conflicts       []merge.ConflictInfo `json:"conflicts"`
 	TaskDescription string               `json:"task_description"`
 }
@@ -100,9 +99,9 @@ func resolverID(num int) string {
 //  6. Create agent record in .alt/agents/
 func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 	altDir := filepath.Join(m.projectRoot, config.DirName)
-	rc, err := config.LoadRig(altDir, ctx.RigName)
+	cfg, err := config.Load(altDir)
 	if err != nil {
-		return nil, fmt.Errorf("loading rig config: %w", err)
+		return nil, fmt.Errorf("loading config: %w", err)
 	}
 
 	num, err := m.nextResolverNum()
@@ -115,26 +114,30 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 	branchName := "alt/resolve-" + ctx.TaskID
 	worktreePath := filepath.Join(m.projectRoot, "worktrees", id)
 
+	repoPath := cfg.RepoPath
+	if repoPath == "" {
+		repoPath = m.projectRoot
+	}
 	baseBranch := ctx.BaseBranch
 	if baseBranch == "" {
-		baseBranch = rc.DefaultBranch
+		baseBranch = cfg.DefaultBranch
 	}
 	if baseBranch == "" {
 		baseBranch = "main"
 	}
 
 	// Create a branch from the base branch (e.g. main) for the resolver to work on.
-	if err := git.CreateBranch(rc.RepoPath, branchName, baseBranch); err != nil {
+	if err := git.CreateBranch(repoPath, branchName, baseBranch); err != nil {
 		return nil, fmt.Errorf("creating branch: %w", err)
 	}
-	if err := git.CreateWorktree(rc.RepoPath, branchName, worktreePath); err != nil {
-		_ = git.DeleteBranch(rc.RepoPath, branchName)
+	if err := git.CreateWorktree(repoPath, branchName, worktreePath); err != nil {
+		_ = git.DeleteBranch(repoPath, branchName)
 		return nil, fmt.Errorf("creating worktree: %w", err)
 	}
 
 	cleanup := func() {
-		_ = git.DeleteWorktree(rc.RepoPath, worktreePath)
-		_ = git.DeleteBranch(rc.RepoPath, branchName)
+		_ = git.DeleteWorktree(repoPath, worktreePath)
+		_ = git.DeleteBranch(repoPath, branchName)
 	}
 
 	// Merge the conflicting branch into the worktree so the resolver sees
@@ -204,7 +207,6 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 	a := &agent.Agent{
 		ID:          id,
 		Role:        agent.RoleResolver,
-		Rig:         ctx.RigName,
 		Status:      agent.StatusActive,
 		CurrentTask: ctx.TaskID,
 		Worktree:    worktreePath,
@@ -225,7 +227,6 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 		AgentID:   id,
 		TaskID:    ctx.TaskID,
 		Data: map[string]any{
-			"rig":      ctx.RigName,
 			"role":     "resolver",
 			"worktree": worktreePath,
 			"branch":   branchName,
@@ -294,18 +295,22 @@ func (m *Manager) CleanupResolver(a *agent.Agent) error {
 	}
 
 	// 2. Delete git worktree.
-	if a.Worktree != "" && a.Rig != "" {
+	if a.Worktree != "" {
 		altDir := filepath.Join(m.projectRoot, config.DirName)
-		rc, err := config.LoadRig(altDir, a.Rig)
+		cfg, err := config.Load(altDir)
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("load rig config: %v", err))
+			errs = append(errs, fmt.Sprintf("load config: %v", err))
 		} else {
-			if err := git.DeleteWorktree(rc.RepoPath, a.Worktree); err != nil {
+			repoPath := cfg.RepoPath
+			if repoPath == "" {
+				repoPath = m.projectRoot
+			}
+			if err := git.DeleteWorktree(repoPath, a.Worktree); err != nil {
 				errs = append(errs, fmt.Sprintf("delete worktree: %v", err))
 			}
 			branchName := "alt/resolve-" + a.CurrentTask
 			if a.CurrentTask != "" {
-				if err := git.DeleteBranch(rc.RepoPath, branchName); err != nil {
+				if err := git.DeleteBranch(repoPath, branchName); err != nil {
 					errs = append(errs, fmt.Sprintf("delete branch: %v", err))
 				}
 			}

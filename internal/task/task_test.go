@@ -118,7 +118,7 @@ func TestValidateTransition(t *testing.T) {
 func TestCreateAndGet(t *testing.T) {
 	s := tempStore(t)
 
-	task := &Task{Title: "Test task", Rig: "altera"}
+	task := &Task{Title: "Test task"}
 	if err := s.Create(task); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -138,9 +138,6 @@ func TestCreateAndGet(t *testing.T) {
 	}
 	if got.Title != "Test task" {
 		t.Errorf("title = %q, want %q", got.Title, "Test task")
-	}
-	if got.Rig != "altera" {
-		t.Errorf("rig = %q, want %q", got.Rig, "altera")
 	}
 }
 
@@ -282,20 +279,6 @@ func TestList_ByStatus(t *testing.T) {
 	}
 	if len(assigned) != 1 {
 		t.Errorf("expected 1 assigned task, got %d", len(assigned))
-	}
-}
-
-func TestList_ByRig(t *testing.T) {
-	s := tempStore(t)
-	s.Create(&Task{ID: "t-aaaaaa", Title: "Altera task", Rig: "altera"})
-	s.Create(&Task{ID: "t-bbbbbb", Title: "Other task", Rig: "other"})
-
-	tasks, err := s.List(Filter{Rig: "altera"})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(tasks) != 1 || tasks[0].Rig != "altera" {
-		t.Errorf("expected 1 altera task, got %d", len(tasks))
 	}
 }
 
@@ -475,7 +458,6 @@ func TestFullLifecycle(t *testing.T) {
 	task := &Task{
 		Title:       "Implement feature",
 		Description: "Build the thing",
-		Rig:         "altera",
 		CreatedBy:   "witness",
 		Tags:        []string{"feature"},
 		Priority:    1,

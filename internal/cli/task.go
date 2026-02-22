@@ -18,7 +18,6 @@ func init() {
 	taskCmd.AddCommand(taskCreateCmd)
 
 	taskListCmd.Flags().StringVar(&taskListStatus, "status", "", "filter by status (open, assigned, in_progress, done, failed)")
-	taskListCmd.Flags().StringVar(&taskListRig, "rig", "", "filter by rig")
 	taskListCmd.Flags().StringVar(&taskListAssignee, "assignee", "", "filter by assignee")
 	taskListCmd.Flags().StringVar(&taskListTag, "tag", "", "filter by tag")
 
@@ -28,7 +27,6 @@ func init() {
 
 var (
 	taskListStatus   string
-	taskListRig      string
 	taskListAssignee string
 	taskListTag      string
 
@@ -45,7 +43,7 @@ var taskCmd = &cobra.Command{
 var taskListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tasks",
-	Long:  `List all tasks, optionally filtered by status, rig, assignee, or tag.`,
+	Long:  `List all tasks, optionally filtered by status, assignee, or tag.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := projectRoot()
 		if err != nil {
@@ -65,7 +63,6 @@ var taskListCmd = &cobra.Command{
 			}
 			f.Status = s
 		}
-		f.Rig = taskListRig
 		f.AssignedTo = taskListAssignee
 		f.Tag = taskListTag
 
@@ -75,10 +72,10 @@ var taskListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSTATUS\tASSIGNED\tRIG\tTITLE")
+		fmt.Fprintln(w, "ID\tSTATUS\tASSIGNED\tTITLE")
 		for _, t := range tasks {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				t.ID, t.Status, t.AssignedTo, t.Rig, t.Title)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+				t.ID, t.Status, t.AssignedTo, t.Title)
 		}
 		w.Flush()
 
@@ -121,9 +118,6 @@ var taskShowCmd = &cobra.Command{
 		}
 		if t.Branch != "" {
 			fmt.Printf("Branch:      %s\n", t.Branch)
-		}
-		if t.Rig != "" {
-			fmt.Printf("Rig:         %s\n", t.Rig)
 		}
 		if t.CreatedBy != "" {
 			fmt.Printf("Created By:  %s\n", t.CreatedBy)

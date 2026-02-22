@@ -15,9 +15,9 @@ import (
 	"github.com/anthropics/altera/internal/tmux"
 )
 
-// setupProject creates a minimal project directory with .alt/, a git repo
-// as the rig's repo, a rig config, and a conflicting branch for testing.
-func setupProject(t *testing.T) (projectRoot, rigRepo, conflictBranch string) {
+// setupProject creates a minimal project directory with .alt/, a git repo,
+// a config, and a conflicting branch for testing.
+func setupProject(t *testing.T) (projectRoot, repoPath, conflictBranch string) {
 	t.Helper()
 
 	projectRoot = t.TempDir()
@@ -26,7 +26,6 @@ func setupProject(t *testing.T) (projectRoot, rigRepo, conflictBranch string) {
 	for _, d := range []string{
 		altDir,
 		filepath.Join(altDir, "agents"),
-		filepath.Join(altDir, "rigs", "test-rig"),
 		filepath.Join(projectRoot, "worktrees"),
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -35,71 +34,71 @@ func setupProject(t *testing.T) (projectRoot, rigRepo, conflictBranch string) {
 	}
 
 	// Create a repo with an initial commit.
-	rigRepo = filepath.Join(t.TempDir(), "rig-repo")
-	if err := os.MkdirAll(rigRepo, 0o755); err != nil {
-		t.Fatalf("mkdir rig repo: %v", err)
+	repoPath = filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
 	}
-	if err := git.Init(rigRepo); err != nil {
+	if err := git.Init(repoPath); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := git.SetAuthor(rigRepo, "test", "test@test.local"); err != nil {
+	if err := git.SetAuthor(repoPath, "test", "test@test.local"); err != nil {
 		t.Fatalf("set author: %v", err)
 	}
 
 	// Create initial file.
-	if err := os.WriteFile(filepath.Join(rigRepo, "hello.txt"), []byte("line 1\nline 2\nline 3\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoPath, "hello.txt"), []byte("line 1\nline 2\nline 3\n"), 0o644); err != nil {
 		t.Fatalf("write hello.txt: %v", err)
 	}
-	if err := git.Add(rigRepo, nil); err != nil {
+	if err := git.Add(repoPath, nil); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
-	if err := git.Commit(rigRepo, "initial commit"); err != nil {
+	if err := git.Commit(repoPath, "initial commit"); err != nil {
 		t.Fatalf("git commit: %v", err)
 	}
 
 	// Create a branch with conflicting changes.
 	conflictBranch = "feature-conflict"
-	if err := git.CreateBranch(rigRepo, conflictBranch, "main"); err != nil {
+	if err := git.CreateBranch(repoPath, conflictBranch, "main"); err != nil {
 		t.Fatalf("create branch: %v", err)
 	}
-	if err := git.Checkout(rigRepo, conflictBranch); err != nil {
+	if err := git.Checkout(repoPath, conflictBranch); err != nil {
 		t.Fatalf("checkout conflict branch: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(rigRepo, "hello.txt"), []byte("line 1\ntheir change\nline 3\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoPath, "hello.txt"), []byte("line 1\ntheir change\nline 3\n"), 0o644); err != nil {
 		t.Fatalf("write conflict: %v", err)
 	}
-	if err := git.Add(rigRepo, nil); err != nil {
+	if err := git.Add(repoPath, nil); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
-	if err := git.Commit(rigRepo, "their change"); err != nil {
+	if err := git.Commit(repoPath, "their change"); err != nil {
 		t.Fatalf("git commit: %v", err)
 	}
 
 	// Switch back to main and make a conflicting change.
-	if err := git.Checkout(rigRepo, "main"); err != nil {
+	if err := git.Checkout(repoPath, "main"); err != nil {
 		t.Fatalf("checkout main: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(rigRepo, "hello.txt"), []byte("line 1\nour change\nline 3\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoPath, "hello.txt"), []byte("line 1\nour change\nline 3\n"), 0o644); err != nil {
 		t.Fatalf("write our change: %v", err)
 	}
-	if err := git.Add(rigRepo, nil); err != nil {
+	if err := git.Add(repoPath, nil); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
-	if err := git.Commit(rigRepo, "our change"); err != nil {
+	if err := git.Commit(repoPath, "our change"); err != nil {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	// Save rig config.
-	rc := config.RigConfig{
-		RepoPath:      rigRepo,
+	// Save config with repo path.
+	cfg := config.Config{
+		RepoPath:      repoPath,
 		DefaultBranch: "main",
 		TestCommand:   "echo ok",
 	}
-	if err := config.SaveRig(altDir, "test-rig", rc); err != nil {
-		t.Fatalf("save rig config: %v", err)
+	if err := config.Save(altDir, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
 	}
 
-	return projectRoot, rigRepo, conflictBranch
+	return projectRoot, repoPath, conflictBranch
 }
 
 func sampleConflictContext(branch string) ConflictContext {
@@ -107,7 +106,6 @@ func sampleConflictContext(branch string) ConflictContext {
 		TaskID:     "t-abc123",
 		Branch:     branch,
 		BaseBranch: "main",
-		RigName:    "test-rig",
 		Conflicts: []merge.ConflictInfo{
 			{
 				Path: "hello.txt",
@@ -453,10 +451,6 @@ func TestSpawnResolver(t *testing.T) {
 	if a.CurrentTask != ctx.TaskID {
 		t.Errorf("agent CurrentTask = %q, want %q", a.CurrentTask, ctx.TaskID)
 	}
-	if a.Rig != "test-rig" {
-		t.Errorf("agent Rig = %q, want %q", a.Rig, "test-rig")
-	}
-
 	// Verify worktree exists.
 	if _, err := os.Stat(a.Worktree); err != nil {
 		t.Errorf("worktree does not exist: %v", err)
@@ -554,7 +548,6 @@ func TestSpawnResolver_NoConflict(t *testing.T) {
 		TaskID:     "t-clean",
 		Branch:     "clean-branch",
 		BaseBranch: "main",
-		RigName:    "test-rig",
 	}
 
 	_, err := m.SpawnResolver(ctx)
@@ -566,19 +559,20 @@ func TestSpawnResolver_NoConflict(t *testing.T) {
 	}
 }
 
-func TestSpawnResolver_BadRig(t *testing.T) {
+func TestSpawnResolver_NoConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	os.MkdirAll(filepath.Join(projectRoot, config.DirName, "agents"), 0o755)
 	m := newTestManager(t, projectRoot)
 
 	ctx := ConflictContext{
-		TaskID:  "t-bad",
-		RigName: "nonexistent-rig",
+		TaskID: "t-bad",
+		Branch: "some-branch",
 	}
 
+	// With no config and no repo, SpawnResolver will fail trying to create a branch.
 	_, err := m.SpawnResolver(ctx)
 	if err == nil {
-		t.Fatal("expected error for nonexistent rig")
+		t.Fatal("expected error when project root is not a git repo")
 	}
 }
 

@@ -17,7 +17,6 @@ When a human describes work to be done, translate it into structured tasks.
   "title": "Short descriptive title",
   "description": "Detailed description with acceptance criteria",
   "status": "open",
-  "rig": "<rig-name>",
   "deps": ["t-other-id"],
   "tags": ["feature", "backend"],
   "priority": 1

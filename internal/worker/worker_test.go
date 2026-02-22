@@ -15,9 +15,9 @@ import (
 	"github.com/anthropics/altera/internal/tmux"
 )
 
-// setupProject creates a minimal project directory with .alt/, a bare git
-// repo as the rig's repo, and a rig config pointing to it.
-func setupProject(t *testing.T) (projectRoot string, rigRepo string) {
+// setupProject creates a minimal project directory with .alt/, a git
+// repo, and a config pointing to it.
+func setupProject(t *testing.T) (projectRoot string, repoPath string) {
 	t.Helper()
 
 	projectRoot = t.TempDir()
@@ -27,7 +27,6 @@ func setupProject(t *testing.T) (projectRoot string, rigRepo string) {
 	for _, d := range []string{
 		altDir,
 		filepath.Join(altDir, "agents"),
-		filepath.Join(altDir, "rigs", "test-rig"),
 		filepath.Join(projectRoot, "worktrees"),
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -35,40 +34,39 @@ func setupProject(t *testing.T) (projectRoot string, rigRepo string) {
 		}
 	}
 
-	// Create a bare repo to serve as the rig's repo, with an initial commit
-	// so branches can be created from it.
-	rigRepo = filepath.Join(t.TempDir(), "rig-repo")
-	if err := os.MkdirAll(rigRepo, 0o755); err != nil {
-		t.Fatalf("mkdir rig repo: %v", err)
+	// Create a repo with an initial commit so branches can be created from it.
+	repoPath = filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
 	}
-	if err := git.Init(rigRepo); err != nil {
+	if err := git.Init(repoPath); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
 	// Need at least one commit for branches to work.
-	if err := os.WriteFile(filepath.Join(rigRepo, "README.md"), []byte("# test\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# test\n"), 0o644); err != nil {
 		t.Fatalf("write readme: %v", err)
 	}
-	if err := git.Add(rigRepo, nil); err != nil {
+	if err := git.Add(repoPath, nil); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
-	if err := git.SetAuthor(rigRepo, "test", "test@test.local"); err != nil {
+	if err := git.SetAuthor(repoPath, "test", "test@test.local"); err != nil {
 		t.Fatalf("set author: %v", err)
 	}
-	if err := git.Commit(rigRepo, "initial commit"); err != nil {
+	if err := git.Commit(repoPath, "initial commit"); err != nil {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	// Save rig config.
-	rc := config.RigConfig{
-		RepoPath:      rigRepo,
+	// Save config with repo path.
+	cfg := config.Config{
+		RepoPath:      repoPath,
 		DefaultBranch: "main",
 		TestCommand:   "echo ok",
 	}
-	if err := config.SaveRig(altDir, "test-rig", rc); err != nil {
-		t.Fatalf("save rig config: %v", err)
+	if err := config.Save(altDir, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
 	}
 
-	return projectRoot, rigRepo
+	return projectRoot, repoPath
 }
 
 func sampleTask() *task.Task {
@@ -77,7 +75,6 @@ func sampleTask() *task.Task {
 		Title:       "Test task",
 		Description: "Implement the widget feature",
 		Status:      task.StatusAssigned,
-		Rig:         "test-rig",
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
@@ -252,7 +249,7 @@ func TestSpawnWorker(t *testing.T) {
 	m := newTestManager(t, projectRoot)
 	tk := sampleTask()
 
-	a, err := m.SpawnWorker(tk, "test-rig")
+	a, err := m.SpawnWorker(tk)
 	if err != nil {
 		t.Fatalf("SpawnWorker: %v", err)
 	}
@@ -272,9 +269,6 @@ func TestSpawnWorker(t *testing.T) {
 	}
 	if a.CurrentTask != tk.ID {
 		t.Errorf("agent CurrentTask = %q, want %q", a.CurrentTask, tk.ID)
-	}
-	if a.Rig != "test-rig" {
-		t.Errorf("agent Rig = %q, want %q", a.Rig, "test-rig")
 	}
 
 	// Verify worktree exists.
@@ -348,7 +342,7 @@ func TestSpawnWorker_SequentialNaming(t *testing.T) {
 
 	// Spawn first worker.
 	t1 := sampleTask()
-	a1, err := m.SpawnWorker(t1, "test-rig")
+	a1, err := m.SpawnWorker(t1)
 	if err != nil {
 		t.Fatalf("SpawnWorker 1: %v", err)
 	}
@@ -364,11 +358,10 @@ func TestSpawnWorker_SequentialNaming(t *testing.T) {
 		Title:       "Second task",
 		Description: "Another task",
 		Status:      task.StatusAssigned,
-		Rig:         "test-rig",
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
-	a2, err := m.SpawnWorker(t2, "test-rig")
+	a2, err := m.SpawnWorker(t2)
 	if err != nil {
 		t.Fatalf("SpawnWorker 2: %v", err)
 	}
@@ -388,7 +381,7 @@ func TestCleanupWorker(t *testing.T) {
 	m := newTestManager(t, projectRoot)
 	tk := sampleTask()
 
-	a, err := m.SpawnWorker(tk, "test-rig")
+	a, err := m.SpawnWorker(tk)
 	if err != nil {
 		t.Fatalf("SpawnWorker: %v", err)
 	}
@@ -482,27 +475,16 @@ func TestListWorkers(t *testing.T) {
 	}
 }
 
-func TestSpawnWorker_BadRig(t *testing.T) {
+func TestSpawnWorker_NoConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	os.MkdirAll(filepath.Join(projectRoot, config.DirName, "agents"), 0o755)
 	m := newTestManager(t, projectRoot)
 	tk := sampleTask()
 
-	_, err := m.SpawnWorker(tk, "nonexistent-rig")
+	// With no config and no repo, SpawnWorker will fail trying to create a branch
+	// in the projectRoot (which is not a git repo).
+	_, err := m.SpawnWorker(tk)
 	if err == nil {
-		t.Fatal("expected error for nonexistent rig")
+		t.Fatal("expected error when project root is not a git repo")
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

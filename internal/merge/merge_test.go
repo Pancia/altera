@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/git"
 	"github.com/anthropics/altera/internal/message"
@@ -253,13 +252,7 @@ func TestAttemptMerge_Success(t *testing.T) {
 	p, evReader := testPipeline(t, root)
 	createTask(t, root, "t-succ01", "feature", "worker-1")
 
-	rig := config.RigConfig{
-		RepoPath:      repo,
-		DefaultBranch: mainBranch,
-		TestCommand:   "true", // always passes
-	}
-
-	result, err := p.AttemptMerge("t-succ01", rig, repo)
+	result, err := p.AttemptMerge("t-succ01", mainBranch, "true", repo)
 	if err != nil {
 		t.Fatalf("AttemptMerge: %v", err)
 	}
@@ -313,12 +306,7 @@ func TestAttemptMerge_Conflict(t *testing.T) {
 	p, evReader := testPipeline(t, root)
 	createTask(t, root, "t-conf01", "conflict-br", "worker-1")
 
-	rig := config.RigConfig{
-		RepoPath:      repo,
-		DefaultBranch: mainBranch,
-	}
-
-	result, err := p.AttemptMerge("t-conf01", rig, repo)
+	result, err := p.AttemptMerge("t-conf01", mainBranch, "", repo)
 	if err != nil {
 		t.Fatalf("AttemptMerge: %v", err)
 	}
@@ -368,13 +356,7 @@ func TestAttemptMerge_TestFailure(t *testing.T) {
 	p, evReader := testPipeline(t, root)
 	createTask(t, root, "t-tfail1", "test-fail-br", "worker-1")
 
-	rig := config.RigConfig{
-		RepoPath:      repo,
-		DefaultBranch: mainBranch,
-		TestCommand:   "exit 1", // always fails
-	}
-
-	result, err := p.AttemptMerge("t-tfail1", rig, repo)
+	result, err := p.AttemptMerge("t-tfail1", mainBranch, "exit 1", repo)
 	if err != nil {
 		t.Fatalf("AttemptMerge: %v", err)
 	}
@@ -405,9 +387,7 @@ func TestAttemptMerge_NoBranch(t *testing.T) {
 	store, _ := task.NewStore(root)
 	store.Create(&task.Task{ID: "t-nobr01", Title: "no branch"})
 
-	rig := config.RigConfig{DefaultBranch: "main"}
-
-	_, err := p.AttemptMerge("t-nobr01", rig, t.TempDir())
+	_, err := p.AttemptMerge("t-nobr01", "main", "", t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for task with no branch")
 	}
@@ -419,9 +399,7 @@ func TestAttemptMerge_NonexistentTask(t *testing.T) {
 	root := t.TempDir()
 	p, _ := testPipeline(t, root)
 
-	rig := config.RigConfig{DefaultBranch: "main"}
-
-	_, err := p.AttemptMerge("t-nonex1", rig, t.TempDir())
+	_, err := p.AttemptMerge("t-nonex1", "main", "", t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for nonexistent task")
 	}
@@ -444,13 +422,7 @@ func TestAttemptMerge_NoTestCommand(t *testing.T) {
 	p, _ := testPipeline(t, root)
 	createTask(t, root, "t-notest", "no-test-br", "worker-1")
 
-	rig := config.RigConfig{
-		RepoPath:      repo,
-		DefaultBranch: mainBranch,
-		TestCommand:   "", // no test command
-	}
-
-	result, err := p.AttemptMerge("t-notest", rig, repo)
+	result, err := p.AttemptMerge("t-notest", mainBranch, "", repo)
 	if err != nil {
 		t.Fatalf("AttemptMerge: %v", err)
 	}
@@ -475,13 +447,7 @@ func TestAttemptMerge_SendsMessage(t *testing.T) {
 	p, _ := testPipeline(t, root)
 	createTask(t, root, "t-msg001", "msg-br", "worker-1")
 
-	rig := config.RigConfig{
-		RepoPath:      repo,
-		DefaultBranch: mainBranch,
-		TestCommand:   "true",
-	}
-
-	p.AttemptMerge("t-msg001", rig, repo)
+	p.AttemptMerge("t-msg001", mainBranch, "true", repo)
 
 	// Check that a merge_result message was sent to the worker.
 	msgDir := filepath.Join(root, ".alt", "messages")
@@ -565,13 +531,7 @@ func TestQueueThenMerge(t *testing.T) {
 	time.Sleep(time.Millisecond)
 	taskID, _ := p.queue.Dequeue()
 
-	rig := config.RigConfig{
-		RepoPath:      repo,
-		DefaultBranch: mainBranch,
-		TestCommand:   "true",
-	}
-
-	result, err := p.AttemptMerge(taskID, rig, repo)
+	result, err := p.AttemptMerge(taskID, mainBranch, "true", repo)
 	if err != nil {
 		t.Fatalf("AttemptMerge: %v", err)
 	}

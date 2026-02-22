@@ -1011,10 +1011,9 @@ func (d *Daemon) buildConflictContext(item MergeItem, conflicts []merge.Conflict
 		Conflicts: conflicts,
 	}
 
-	// Look up the task for rig name and description.
+	// Look up the task for description.
 	t, err := d.tasks.Get(item.TaskID)
 	if err == nil {
-		ctx.RigName = t.Rig
 		ctx.TaskDescription = t.Description
 	}
 
