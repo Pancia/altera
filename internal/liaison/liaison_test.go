@@ -60,13 +60,7 @@ func TestLiaisonPrompt(t *testing.T) {
 
 	for _, want := range []string{
 		"Liaison Agent",
-		"alt task create",
-		"alt daemon status",
-		"SessionStart",
-		"UserPromptSubmit",
-		"PreCompact",
-		"help",
-		"merge",
+		"alt help liaison startup",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("LiaisonPrompt() missing %q", want)

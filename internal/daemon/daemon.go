@@ -1166,36 +1166,15 @@ func writeWorkerTaskJSON(worktreePath string, t *task.Task) error {
 	return os.WriteFile(filepath.Join(worktreePath, "task.json"), data, 0o644)
 }
 
-// writeWorkerClaudeMD writes CLAUDE.md with the worker system prompt.
+// writeWorkerClaudeMD writes CLAUDE.md with a minimal worker bootstrap prompt.
 func writeWorkerClaudeMD(worktreePath string, t *task.Task, agentID string) error {
 	prompt := fmt.Sprintf(`# Worker Agent: %s
-
-You are a worker agent in the Altera multi-agent system.
-
-## Your Assignment
 
 - **Task ID**: %s
 - **Title**: %s
 
-## Task Description
-
-%s
-
-## Instructions
-
-1. Read task.json in your worktree root for full task details
-2. Implement the required changes
-3. Run tests to verify your work: go test ./...
-4. Commit your changes with a clear message referencing the task ID
-5. When done, run: alt task-done %s %s
-
-## Important
-
-- Stay focused on your assigned task
-- Commit early and often
-- Do not modify files outside your task scope
-- When finished, you MUST run the alt task-done command above
-`, agentID, t.ID, t.Title, t.Description, t.ID, agentID)
+Run `+"`alt help worker startup`"+` for full instructions.
+`, agentID, t.ID, t.Title)
 
 	return os.WriteFile(filepath.Join(worktreePath, "CLAUDE.md"), []byte(prompt), 0o644)
 }

@@ -334,43 +334,16 @@ func writeClaudeSettings(worktreePath, agentID string) error {
 	return os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0o644)
 }
 
-// WorkerPrompt generates the CLAUDE.md system prompt for a worker agent.
+// WorkerPrompt generates a minimal CLAUDE.md bootstrap prompt for a worker agent.
 func WorkerPrompt(t *task.Task, agentID, rigName string) string {
 	return fmt.Sprintf(`# Worker Agent: %s
-
-You are a worker agent in the Altera multi-agent system.
-
-## Your Assignment
 
 - **Task ID**: %s
 - **Title**: %s
 - **Rig**: %s
 
-## Task Description
-
-%s
-
-## Instructions
-
-1. Read task.json in your worktree root for full task details
-2. Implement the required changes
-3. Run the test command to verify your work
-4. Commit your changes with a clear message
-5. Use 'alt checkpoint %s' to report progress
-
-## Hooks
-
-Your session is configured with automatic hooks:
-- **Heartbeat**: Sent before each tool use to signal you're alive
-- **Checkpoint**: Sent when you stop to save progress
-
-## Important
-
-- Stay focused on your assigned task
-- Commit early and often
-- If you're stuck, report via checkpoint
-- Do not modify files outside your task scope
-`, agentID, t.ID, t.Title, rigName, t.Description, agentID)
+Run `+"`alt help worker startup`"+` for full instructions.
+`, agentID, t.ID, t.Title, rigName)
 }
 
 // writeClaudeMD writes CLAUDE.md with the worker system prompt.
