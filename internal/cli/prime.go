@@ -11,6 +11,7 @@ import (
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/liaison"
 	"github.com/anthropics/altera/internal/message"
+	"github.com/anthropics/altera/internal/prompts/help"
 	"github.com/anthropics/altera/internal/task"
 	"github.com/spf13/cobra"
 )
@@ -107,13 +108,18 @@ func detectRole(root, altDir string) (string, string) {
 
 // primeLiaison outputs a slim role header + runtime state.
 func primeLiaison(root, altDir string) error {
-	fmt.Println("# Liaison Agent")
-	fmt.Println()
-	fmt.Println("You are the liaison agent in the Altera multi-agent orchestration system.")
-	fmt.Println("You translate between human intent and the task/agent system.")
-	fmt.Println()
-	fmt.Println("Use `alt help liaison startup` for instructions. Use `alt <command> --help` for syntax.")
-	fmt.Println()
+	// Inline the full liaison startup help so the agent has instructions immediately.
+	startupHelp, err := help.Lookup("liaison", "startup")
+	if err != nil {
+		// Fallback to the brief header if help content is missing.
+		fmt.Println("# Liaison Agent")
+		fmt.Println()
+		fmt.Println("You are the liaison agent in the Altera multi-agent orchestration system.")
+		fmt.Println("You translate between human intent and the task/agent system.")
+		fmt.Println()
+	} else {
+		fmt.Println(startupHelp)
+	}
 
 	// Output runtime state using the liaison manager's Prime() logic.
 	agentStore, err := agent.NewStore(filepath.Join(altDir, "agents"))
