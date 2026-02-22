@@ -158,7 +158,7 @@ func (m *Manager) SpawnWorker(t *task.Task) (*agent.Agent, error) {
 		"Read task.json, then run alt help worker startup for full instructions. When finished, run: alt task-done %s %s",
 		t.ID, id,
 	)
-	claudeCmd := fmt.Sprintf("cd %s && ALT_AGENT_ID=%s claude --dangerously-skip-permissions %q", worktreePath, id, initialPrompt)
+	claudeCmd := fmt.Sprintf("cd %s && env -u CLAUDECODE ALT_AGENT_ID=%s claude --dangerously-skip-permissions %q", worktreePath, id, initialPrompt)
 	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
 		_ = tmux.KillSession(sessionName)
 		cleanup()
@@ -171,7 +171,7 @@ func (m *Manager) SpawnWorker(t *task.Task) (*agent.Agent, error) {
 	// Start terminal logging if debug mode is enabled.
 	if config.DebugEnabled(altDir) {
 		logsDir := config.LogsDir(altDir)
-		os.MkdirAll(logsDir, 0o755)
+		_ = os.MkdirAll(logsDir, 0o755)
 		logPath := filepath.Join(logsDir, id+".terminal.log")
 		_ = tmux.StartLogging(sessionName, logPath)
 	}
@@ -242,11 +242,15 @@ func (m *Manager) CleanupWorker(a *agent.Agent) error {
 			if err := git.DeleteWorktree(repoPath, a.Worktree); err != nil {
 				errs = append(errs, fmt.Sprintf("delete worktree: %v", err))
 			}
-			// Also delete the branch.
-			branchName := "alt/t-" + a.CurrentTask
+			// Look up actual branch name from task record.
 			if a.CurrentTask != "" {
-				if err := git.DeleteBranch(repoPath, branchName); err != nil {
-					errs = append(errs, fmt.Sprintf("delete branch: %v", err))
+				taskStore, taskErr := task.NewStore(m.projectRoot)
+				if taskErr != nil {
+					errs = append(errs, fmt.Sprintf("open task store: %v", taskErr))
+				} else if t, taskErr := taskStore.Get(a.CurrentTask); taskErr == nil && t.Branch != "" {
+					if err := git.DeleteBranch(repoPath, t.Branch); err != nil {
+						errs = append(errs, fmt.Sprintf("delete branch: %v", err))
+					}
 				}
 			}
 		}
@@ -299,7 +303,7 @@ func (m *Manager) copyTranscript(a *agent.Agent) {
 	}
 	altDir := filepath.Join(m.projectRoot, config.DirName)
 	logsDir := config.LogsDir(altDir)
-	os.MkdirAll(logsDir, 0o755)
+	_ = os.MkdirAll(logsDir, 0o755)
 	dst := filepath.Join(logsDir, a.ID+".jsonl")
 	data, err := os.ReadFile(transcripts[0])
 	if err != nil {

@@ -238,6 +238,55 @@ func TestCheckAgentLiveness_WithTaskReclaim(t *testing.T) {
 	}
 }
 
+func TestCheckAgentLiveness_DoneTaskNotReclaimed(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a task already marked done (e.g. task_done was processed).
+	tk := &task.Task{
+		Title:      "completed task",
+		Status:     task.StatusDone,
+		AssignedTo: "test-dead-done",
+		Branch:     "worker/test-dead-done",
+		Result:     "success",
+	}
+	if err := d.tasks.Create(tk); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Create a dead agent that was working on the now-done task.
+	a := &agent.Agent{
+		ID:          "test-dead-done",
+		Role:        agent.RoleWorker,
+		Status:      agent.StatusActive,
+		CurrentTask: tk.ID,
+		PID:         9999999, // non-existent
+		Heartbeat:   time.Now().Add(-5 * time.Minute),
+		StartedAt:   time.Now().Add(-10 * time.Minute),
+	}
+	if err := d.agents.Create(a); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.checkAgentLiveness(&tickEvents)
+
+	// Task should remain done — not reclaimed back to open.
+	updatedTask, err := d.tasks.Get(tk.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.Status != task.StatusDone {
+		t.Errorf("task status = %q, want %q (done task should not be reclaimed)", updatedTask.Status, task.StatusDone)
+	}
+	if updatedTask.Branch != "worker/test-dead-done" {
+		t.Errorf("task branch = %q, want %q (branch should be preserved for merge)", updatedTask.Branch, "worker/test-dead-done")
+	}
+}
+
 func TestCheckAgentLiveness_AliveAgent(t *testing.T) {
 	root := setupTestProject(t)
 	d, err := New(root)
@@ -677,10 +726,11 @@ func TestProcessMessages_TaskDone(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// Create a task in in_progress state.
+	// Create a task in assigned state — the daemon sets tasks to assigned
+	// during spawn, so task_done must handle assigned -> done directly.
 	tk := &task.Task{
 		Title:      "test task",
-		Status:     task.StatusInProgress,
+		Status:     task.StatusAssigned,
 		AssignedTo: "worker-1",
 		Branch:     "worker/w-abc123",
 	}
@@ -750,6 +800,44 @@ func TestProcessMessages_TaskDone(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Errorf("pending daemon messages = %d, want 0", len(pending))
+	}
+}
+
+func TestProcessMessages_TaskDone_FailedNotArchived(t *testing.T) {
+	root := setupTestProject(t)
+	d, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Create a task_done message referencing a non-existent task.
+	// This will cause handleTaskDone to fail (task not found).
+	_, err = d.messages.Create(
+		message.TypeTaskDone,
+		"worker-1",
+		"daemon",
+		"t-nonexistent",
+		map[string]any{"result": "done"},
+	)
+	if err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	var tickEvents []events.Event
+	d.processMessages(&tickEvents)
+
+	// Message should NOT be archived — it should remain pending for retry.
+	pending, err := d.messages.ListPending("daemon")
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Errorf("pending daemon messages = %d, want 1 (failed message should not be archived)", len(pending))
+	}
+
+	// No events should be emitted for a failed task_done.
+	if len(tickEvents) != 0 {
+		t.Errorf("tick events = %d, want 0", len(tickEvents))
 	}
 }
 
