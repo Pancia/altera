@@ -3,7 +3,9 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -17,7 +19,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var statusLive bool
+var statusInterval int
+
 func init() {
+	statusCmd.Flags().BoolVar(&statusLive, "live", false, "Continuously refresh status")
+	statusCmd.Flags().IntVar(&statusInterval, "interval", 2, "Refresh interval in seconds (used with --live)")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -32,8 +39,40 @@ var statusCmd = &cobra.Command{
 		}
 
 		root := filepath.Dir(altDir)
+
+		if statusLive {
+			return runStatusLive(root, altDir)
+		}
 		return runStatus(root, altDir)
 	},
+}
+
+func runStatusLive(root, altDir string) error {
+	interval := time.Duration(statusInterval) * time.Second
+	if interval < time.Second {
+		interval = time.Second
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	for {
+		// Clear screen and move cursor to top-left.
+		fmt.Print("\033[H\033[2J")
+		fmt.Printf("alt status --live  (every %s, Ctrl-C to quit)\n", interval)
+		fmt.Printf("Updated: %s\n\n", time.Now().Format("15:04:05"))
+
+		if err := runStatus(root, altDir); err != nil {
+			return err
+		}
+
+		select {
+		case <-sigCh:
+			fmt.Println("\nStopped.")
+			return nil
+		case <-time.After(interval):
+		}
+	}
 }
 
 func runStatus(root, altDir string) error {

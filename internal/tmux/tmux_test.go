@@ -24,8 +24,8 @@ func testSession(t *testing.T) string {
 	// Sanitize: tmux session names can't contain dots or colons.
 	name = strings.NewReplacer(".", "_", ":", "_", "/", "_").Replace(name)
 	t.Cleanup(func() {
-		// Best-effort cleanup.
-		exec.Command("tmux", "kill-session", "-t", name).Run()
+		// Best-effort cleanup on the alt socket.
+		exec.Command("tmux", "-L", SocketName, "kill-session", "-t", name).Run()
 	})
 	return name
 }
@@ -152,12 +152,12 @@ func TestListSessions(t *testing.T) {
 func TestListSessionsFiltersNonAlt(t *testing.T) {
 	requireTmux(t)
 
-	// Create a non-alt session.
+	// Create a non-alt session on the alt socket.
 	nonAlt := "noalt-test-" + t.Name()
 	nonAlt = strings.NewReplacer(".", "_", ":", "_", "/", "_").Replace(nonAlt)
-	exec.Command("tmux", "new-session", "-d", "-s", nonAlt).Run()
+	exec.Command("tmux", "-L", SocketName, "new-session", "-d", "-s", nonAlt).Run()
 	t.Cleanup(func() {
-		exec.Command("tmux", "kill-session", "-t", nonAlt).Run()
+		exec.Command("tmux", "-L", SocketName, "kill-session", "-t", nonAlt).Run()
 	})
 
 	sessions, err := ListSessions()

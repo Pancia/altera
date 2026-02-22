@@ -13,6 +13,7 @@ func init() {
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
+	daemonCmd.AddCommand(daemonTickCmd)
 }
 
 var daemonCmd = &cobra.Command{
@@ -74,6 +75,23 @@ var daemonStatusCmd = &cobra.Command{
 		} else {
 			fmt.Println("Daemon is not running.")
 		}
+		return nil
+	},
+}
+
+var daemonTickCmd = &cobra.Command{
+	Use:   "tick",
+	Short: "Force an immediate daemon tick",
+	Long:  `Sends SIGUSR1 to the daemon to trigger an immediate tick cycle.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		altDir, err := resolveAltDir()
+		if err != nil {
+			return err
+		}
+		if err := daemon.SendTickNow(altDir); err != nil {
+			return err
+		}
+		fmt.Println("Tick signal sent.")
 		return nil
 	},
 }

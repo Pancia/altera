@@ -7,12 +7,21 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
 
+// SocketName is the tmux server socket name used to isolate alt sessions.
+const SocketName = "alt"
+
 // SessionPrefix is prepended to all Altera-managed tmux session names.
 const SessionPrefix = "alt-"
+
+// socketArgs returns the args to select the alt tmux server socket.
+func socketArgs() []string {
+	return []string{"-L", SocketName}
+}
 
 // SessionName builds a canonical session name from role and id.
 func SessionName(role, id string) string {
@@ -21,19 +30,22 @@ func SessionName(role, id string) string {
 
 // CreateSession creates a new detached tmux session with the given name.
 func CreateSession(name string) error {
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", name)
+	args := append(socketArgs(), "new-session", "-d", "-s", name)
+	cmd := exec.Command("tmux", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux new-session %q: %s: %w", name, strings.TrimSpace(string(out)), err)
 	}
 	// Enable mouse mode for scrolling in this session only.
-	mouseCmd := exec.Command("tmux", "set-option", "-t", name, "mouse", "on")
+	mouseArgs := append(socketArgs(), "set-option", "-t", name, "mouse", "on")
+	mouseCmd := exec.Command("tmux", mouseArgs...)
 	_ = mouseCmd.Run()
 	return nil
 }
 
 // KillSession destroys the tmux session with the given name.
 func KillSession(name string) error {
-	cmd := exec.Command("tmux", "kill-session", "-t", name)
+	args := append(socketArgs(), "kill-session", "-t", name)
+	cmd := exec.Command("tmux", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux kill-session %q: %s: %w", name, strings.TrimSpace(string(out)), err)
 	}
@@ -42,7 +54,8 @@ func KillSession(name string) error {
 
 // SessionExists returns true if the named tmux session exists.
 func SessionExists(name string) bool {
-	cmd := exec.Command("tmux", "has-session", "-t", name)
+	args := append(socketArgs(), "has-session", "-t", name)
+	cmd := exec.Command("tmux", args...)
 	return cmd.Run() == nil
 }
 
@@ -54,7 +67,8 @@ func AttachSession(name string) error {
 	if err != nil {
 		return fmt.Errorf("tmux not found: %w", err)
 	}
-	cmd := exec.Command(tmuxPath, "attach-session", "-t", name)
+	args := append(socketArgs(), "attach-session", "-t", name)
+	cmd := exec.Command(tmuxPath, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -64,10 +78,27 @@ func AttachSession(name string) error {
 	return nil
 }
 
+// PanePID returns the PID of the foreground process in the session's active pane.
+func PanePID(session string) (int, error) {
+	args := append(socketArgs(), "list-panes", "-t", session, "-F", "#{pane_pid}")
+	cmd := exec.Command("tmux", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("tmux list-panes %q: %s: %w", session, strings.TrimSpace(string(out)), err)
+	}
+	line := strings.TrimSpace(strings.Split(strings.TrimSpace(string(out)), "\n")[0])
+	pid, err := strconv.Atoi(line)
+	if err != nil {
+		return 0, fmt.Errorf("parse pane pid %q: %w", line, err)
+	}
+	return pid, nil
+}
+
 // SendKeys sends the given keys (typically a shell command + Enter) to a
 // tmux session's active pane.
 func SendKeys(session, keys string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", session, keys, "Enter")
+	args := append(socketArgs(), "send-keys", "-t", session, keys, "Enter")
+	cmd := exec.Command("tmux", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux send-keys %q: %s: %w", session, strings.TrimSpace(string(out)), err)
 	}
@@ -77,7 +108,7 @@ func SendKeys(session, keys string) error {
 // CapturePane captures the last n lines of output from the session's pane.
 // If lines is 0, tmux captures the visible pane content.
 func CapturePane(session string, lines int) (string, error) {
-	args := []string{"capture-pane", "-t", session, "-p"}
+	args := append(socketArgs(), "capture-pane", "-t", session, "-p")
 	if lines > 0 {
 		start := fmt.Sprintf("-%d", lines)
 		args = append(args, "-S", start)
@@ -93,7 +124,8 @@ func CapturePane(session string, lines int) (string, error) {
 // ListSessions returns the names of all Altera-managed tmux sessions
 // (those starting with SessionPrefix).
 func ListSessions() ([]string, error) {
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
+	args := append(socketArgs(), "list-sessions", "-F", "#{session_name}")
+	cmd := exec.Command("tmux", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// "no server running" or "no sessions" is not an error for listing.

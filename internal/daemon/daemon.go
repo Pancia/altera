@@ -59,6 +59,7 @@ type Daemon struct {
 	logger   *slog.Logger
 	tickNum  int64
 	shutdown chan struct{} // closed to signal shutdown
+	tickNow  chan struct{} // buffered(1), receives SIGUSR1 forced ticks
 }
 
 // New creates a Daemon rooted at the given project directory. The .alt/
@@ -122,6 +123,7 @@ func New(rootDir string) (*Daemon, error) {
 		pidFile:     filepath.Join(altDir, "daemon.pid"),
 		logger:      logger,
 		shutdown:    make(chan struct{}),
+		tickNow:     make(chan struct{}, 1),
 	}, nil
 }
 
@@ -162,6 +164,14 @@ func (d *Daemon) Run() error {
 			return nil
 		case <-ticker.C:
 			d.tick()
+		case <-d.tickNow:
+			d.logger.Info("forced tick (SIGUSR1)")
+			d.events.Append(events.Event{
+				Timestamp: time.Now(),
+				Type:      events.DaemonTickForced,
+			})
+			d.tick()
+			ticker.Reset(TickInterval)
 		}
 	}
 }
@@ -704,11 +714,18 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		"Read CLAUDE.md and task.json, then implement the task. When finished, run: alt task-done %s %s",
 		t.ID, agentID,
 	)
-	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions %q", worktreePath, initialPrompt)
+	claudeCmd := fmt.Sprintf("cd %s && exec claude --dangerously-skip-permissions %q", worktreePath, initialPrompt)
 	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
 		tmux.KillSession(sessionName)
 		cleanupGit()
 		return "", fmt.Errorf("start claude in worker: %w", err)
+	}
+
+	// Give the exec a moment to replace the shell process, then read the pane PID.
+	time.Sleep(500 * time.Millisecond)
+	panePID, err := tmux.PanePID(sessionName)
+	if err != nil {
+		d.logger.Warn("spawn: could not read pane PID", "session", sessionName, "error", err)
 	}
 
 	// Register the agent.
@@ -719,6 +736,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		CurrentTask: t.ID,
 		Worktree:    worktreePath,
 		TmuxSession: sessionName,
+		PID:         panePID,
 		Heartbeat:   time.Now(),
 		StartedAt:   time.Now(),
 	}
@@ -1155,16 +1173,33 @@ func (d *Daemon) releaseLock() {
 // shutdown. The handler finishes the current tick before exiting.
 func (d *Daemon) installSignalHandler() {
 	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGUSR1)
 	go func() {
-		sig := <-sigCh
-		d.logger.Info("received signal, shutting down gracefully", "signal", sig)
-		d.Stop()
+		for {
+			sig := <-sigCh
+			if sig == syscall.SIGUSR1 {
+				d.logger.Info("received SIGUSR1, forcing tick")
+				// Non-blocking send: at most one forced tick queued.
+				select {
+				case d.tickNow <- struct{}{}:
+				default:
+				}
+				continue
+			}
+			// SIGTERM/SIGINT → graceful shutdown.
+			d.logger.Info("received signal, shutting down gracefully", "signal", sig)
+			d.Stop()
 
-		// Second signal forces immediate exit.
-		sig = <-sigCh
-		d.logger.Error("received second signal, forcing exit", "signal", sig)
-		os.Exit(1)
+			// After shutdown, ignore SIGUSR1 while waiting for force-exit.
+			for {
+				sig = <-sigCh
+				if sig == syscall.SIGUSR1 {
+					continue
+				}
+				d.logger.Error("received second signal, forcing exit", "signal", sig)
+				os.Exit(1)
+			}
+		}
 	}()
 }
 
@@ -1220,6 +1255,23 @@ func SendStop(altDir string) error {
 	}
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("send SIGTERM to daemon (pid %d): %w", st.PID, err)
+	}
+	return nil
+}
+
+// SendTickNow sends SIGUSR1 to a running daemon to trigger an immediate tick.
+func SendTickNow(altDir string) error {
+	st := ReadStatus(altDir)
+	if !st.Running {
+		return fmt.Errorf("daemon is not running")
+	}
+
+	proc, err := os.FindProcess(st.PID)
+	if err != nil {
+		return fmt.Errorf("find daemon process: %w", err)
+	}
+	if err := proc.Signal(syscall.SIGUSR1); err != nil {
+		return fmt.Errorf("send SIGUSR1 to daemon (pid %d): %w", st.PID, err)
 	}
 	return nil
 }
