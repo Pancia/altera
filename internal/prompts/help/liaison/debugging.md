@@ -46,14 +46,27 @@ alt start --debug
 
 This writes raw terminal output to `.alt/logs/<id>.terminal.log` for every agent session. These files persist after `alt stop`, making them useful for post-mortem analysis of crashes or unexpected behavior.
 
+## Viewing Daemon Logs
+
+The daemon writes logs to `.alt/logs/daemon.log`. View them without attaching to tmux:
+
+```
+alt daemon logs              # Last 50 lines
+alt daemon logs -n 100       # Last 100 lines
+alt daemon logs -f           # Follow log output (Ctrl-C to stop)
+```
+
+The log file is truncated each time the daemon starts, so it always reflects the current session. Logs from previous sessions are not preserved.
+
 ## Useful Debugging Workflow
 
 1. Check worker status: `alt worker list`
-2. Peek at recent output: `alt worker peek <id>`
-3. If stuck, read the conversation: `alt worker peek <id> --session`
-4. For detailed state: `alt worker inspect <id>`
-5. If needed, attach interactively: `alt worker attach <id>`
-6. Send guidance: `alt message send <id> "<advice>"`
+2. Check daemon logs: `alt daemon logs`
+3. Peek at recent output: `alt worker peek <id>`
+4. If stuck, read the conversation: `alt worker peek <id> --session`
+5. For detailed state: `alt worker inspect <id>`
+6. If needed, attach interactively: `alt worker attach <id>`
+7. Send guidance: `alt message send <id> "<advice>"`
 
 ## Log Files
 
@@ -61,6 +74,7 @@ When debug mode is enabled or workers die, logs are stored in `.alt/logs/`:
 
 ```
 .alt/logs/
+├── daemon.log               # Daemon log (current session, always written)
 ├── w-abc123.terminal.log   # Raw terminal output (debug mode only)
 ├── w-abc123.jsonl           # Claude Code conversation transcript
 ├── worker-01.terminal.log

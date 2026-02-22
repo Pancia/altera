@@ -51,6 +51,7 @@ For more details: `alt help liaison debugging`
 - Start: `alt daemon start`
 - Stop: `alt daemon stop`
 - Force tick: `alt daemon tick`
+- View logs: `alt daemon logs` (last 50 lines; `-n 100` for more; `-f` to follow)
 
 ### Configuration
 - List all settings: `alt config list`
