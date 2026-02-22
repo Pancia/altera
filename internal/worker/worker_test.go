@@ -262,7 +262,7 @@ func TestWriteClaudeMD(t *testing.T) {
 		"t-abc123",
 		"Test task",
 		"test-rig",
-		"Implement the widget feature",
+		"alt help worker startup",
 	} {
 		if !contains(content, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
@@ -279,8 +279,7 @@ func TestWorkerPrompt(t *testing.T) {
 		"t-abc123",
 		"Test task",
 		"my-rig",
-		"Implement the widget feature",
-		"alt checkpoint worker-05",
+		"alt help worker startup",
 	} {
 		if !contains(prompt, want) {
 			t.Errorf("prompt missing %q", want)
