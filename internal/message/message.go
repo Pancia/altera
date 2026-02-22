@@ -21,6 +21,7 @@ const (
 	TypeMergeResult Type = "merge_result"
 	TypeHelp        Type = "help"
 	TypeCheckpoint  Type = "checkpoint"
+	TypeUserMessage Type = "user_message"
 )
 
 // Message is the data model for inter-agent communication.
@@ -45,6 +46,7 @@ var validTypes = map[Type]bool{
 	TypeMergeResult: true,
 	TypeHelp:        true,
 	TypeCheckpoint:  true,
+	TypeUserMessage: true,
 }
 
 // Store manages message persistence in the filesystem.

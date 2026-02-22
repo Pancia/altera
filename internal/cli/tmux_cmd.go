@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/anthropics/altera/internal/tmux"
 	"github.com/spf13/cobra"
@@ -14,6 +15,7 @@ func init() {
 	tmuxCmd.AddCommand(tmuxListCmd)
 	tmuxCmd.AddCommand(tmuxAttachCmd)
 	tmuxCmd.AddCommand(tmuxClientCmd)
+	tmuxCmd.AddCommand(tmuxSendCmd)
 }
 
 var tmuxCmd = &cobra.Command{
@@ -47,6 +49,20 @@ var tmuxAttachCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return tmux.AttachSession(args[0])
+	},
+}
+
+var tmuxSendCmd = &cobra.Command{
+	Use:   "send <session> <keys...>",
+	Short: "Send keys to a tmux session (Enter sent separately)",
+	Args:  cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		session := args[0]
+		keys := strings.Join(args[1:], " ")
+		if err := tmux.SendText(session, keys); err != nil {
+			return err
+		}
+		return tmux.SendEnter(session)
 	},
 }
 

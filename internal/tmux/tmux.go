@@ -105,6 +105,26 @@ func SendKeys(session, keys string) error {
 	return nil
 }
 
+// SendText sends text to a session WITHOUT pressing Enter.
+func SendText(session, text string) error {
+	args := append(socketArgs(), "send-keys", "-t", session, text)
+	cmd := exec.Command("tmux", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-text %q: %s: %w", session, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// SendEnter sends the Enter key to a session.
+func SendEnter(session string) error {
+	args := append(socketArgs(), "send-keys", "-t", session, "Enter")
+	cmd := exec.Command("tmux", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux send-enter %q: %s: %w", session, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 // CapturePane captures the last n lines of output from the session's pane.
 // If lines is 0, tmux captures the visible pane content.
 func CapturePane(session string, lines int) (string, error) {
