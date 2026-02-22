@@ -166,9 +166,60 @@ func TestTouchHeartbeatNotFound(t *testing.T) {
 	}
 }
 
+func TestCheckPID_Alive(t *testing.T) {
+	a := sampleAgent("a1")
+	a.PID = os.Getpid()
+	if !CheckPID(a) {
+		t.Error("expected current process to be alive")
+	}
+}
+
+func TestCheckPID_DeadProcess(t *testing.T) {
+	a := sampleAgent("a1")
+	a.PID = 999999999
+	if CheckPID(a) {
+		t.Error("expected dead process to return false")
+	}
+}
+
+func TestCheckPID_NoPID(t *testing.T) {
+	a := sampleAgent("a1")
+	a.PID = 0
+	if CheckPID(a) {
+		t.Error("expected zero PID to return false")
+	}
+}
+
+func TestHeartbeatStaleness_Fresh(t *testing.T) {
+	a := sampleAgent("a1")
+	a.Heartbeat = time.Now()
+	s := HeartbeatStaleness(a)
+	if s > time.Second {
+		t.Errorf("expected fresh heartbeat staleness < 1s, got %v", s)
+	}
+}
+
+func TestHeartbeatStaleness_Stale(t *testing.T) {
+	a := sampleAgent("a1")
+	a.Heartbeat = time.Now().Add(-5 * time.Minute)
+	s := HeartbeatStaleness(a)
+	if s < 4*time.Minute {
+		t.Errorf("expected staleness >= 4m, got %v", s)
+	}
+}
+
+func TestHeartbeatTimeoutConstants(t *testing.T) {
+	if HeartbeatWarnTimeout >= HeartbeatCriticalTimeout {
+		t.Errorf("warn (%v) should be < critical (%v)", HeartbeatWarnTimeout, HeartbeatCriticalTimeout)
+	}
+	if HeartbeatCriticalTimeout >= HeartbeatDeadTimeout {
+		t.Errorf("critical (%v) should be < dead (%v)", HeartbeatCriticalTimeout, HeartbeatDeadTimeout)
+	}
+}
+
 func TestCheckLiveness_Alive(t *testing.T) {
 	a := sampleAgent("a1")
-	a.PID = os.Getpid() // current process is alive
+	a.PID = os.Getpid()
 	a.Heartbeat = time.Now()
 	if !CheckLiveness(a) {
 		t.Error("expected alive agent to be live")
@@ -187,7 +238,7 @@ func TestCheckLiveness_StaleHeartbeat(t *testing.T) {
 func TestCheckLiveness_DeadProcess(t *testing.T) {
 	a := sampleAgent("a1")
 	a.Heartbeat = time.Now()
-	a.PID = 999999999 // very unlikely to exist
+	a.PID = 999999999
 	if CheckLiveness(a) {
 		t.Error("expected dead process to be not live")
 	}
@@ -199,6 +250,28 @@ func TestCheckLiveness_NoPID(t *testing.T) {
 	a.PID = 0
 	if CheckLiveness(a) {
 		t.Error("expected zero PID to be not live")
+	}
+}
+
+func TestEscalationFields(t *testing.T) {
+	s := newTestStore(t)
+	a := sampleAgent("a1")
+	a.EscalationLevel = "warning"
+	a.LastEscalation = time.Now()
+
+	if err := s.Create(a); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := s.Get("a1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.EscalationLevel != "warning" {
+		t.Errorf("EscalationLevel = %q, want %q", got.EscalationLevel, "warning")
+	}
+	if got.LastEscalation.IsZero() {
+		t.Error("LastEscalation should not be zero")
 	}
 }
 

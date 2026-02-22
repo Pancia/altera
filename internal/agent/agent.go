@@ -39,9 +39,11 @@ type Agent struct {
 	TmuxSession  string    `json:"tmux_session,omitempty"`
 	PID          int       `json:"pid,omitempty"`
 	Heartbeat    time.Time `json:"heartbeat"`
-	LastProgress    string    `json:"last_progress,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
+	LastProgress      string    `json:"last_progress,omitempty"`
+	StartedAt         time.Time `json:"started_at"`
 	LastStallNotified time.Time `json:"last_stall_notified,omitempty"`
+	EscalationLevel   string    `json:"escalation_level,omitempty"`
+	LastEscalation    time.Time `json:"last_escalation,omitempty"`
 }
 
 var (
@@ -155,17 +157,20 @@ func (s *Store) TouchHeartbeat(id string) error {
 	return s.Update(a)
 }
 
-// HeartbeatTimeout is the duration after which a heartbeat is considered stale.
-// Set generous to allow for Claude Code startup time (~15-30s) plus the
-// daemon tick interval (60s).
-var HeartbeatTimeout = 3 * time.Minute
+// Heartbeat escalation thresholds.
+var (
+	HeartbeatWarnTimeout     = 3 * time.Minute
+	HeartbeatCriticalTimeout = 6 * time.Minute
+	HeartbeatDeadTimeout     = 10 * time.Minute
+)
 
-// CheckLiveness returns true if the agent's heartbeat is fresh and its
-// OS process still exists (verified via signal 0).
-func CheckLiveness(a *Agent) bool {
-	if time.Since(a.Heartbeat) > HeartbeatTimeout {
-		return false
-	}
+// HeartbeatTimeout is kept for backward compatibility with callers that
+// reference the original threshold. It equals HeartbeatWarnTimeout.
+var HeartbeatTimeout = HeartbeatWarnTimeout
+
+// CheckPID returns true if the agent's OS process is still running
+// (verified via signal 0).
+func CheckPID(a *Agent) bool {
 	if a.PID <= 0 {
 		return false
 	}
@@ -173,8 +178,23 @@ func CheckLiveness(a *Agent) bool {
 	if err != nil {
 		return false
 	}
-	// Signal 0 checks existence without actually signaling.
 	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// HeartbeatStaleness returns how long it has been since the agent's last
+// heartbeat. A zero or negative duration means the heartbeat is fresh.
+func HeartbeatStaleness(a *Agent) time.Duration {
+	return time.Since(a.Heartbeat)
+}
+
+// CheckLiveness returns true if the agent's heartbeat is fresh and its
+// OS process still exists. It is preserved for backward compatibility;
+// new code should use CheckPID and HeartbeatStaleness directly.
+func CheckLiveness(a *Agent) bool {
+	if HeartbeatStaleness(a) > HeartbeatTimeout {
+		return false
+	}
+	return CheckPID(a)
 }
 
 // listAll reads every agent file in the store directory.
