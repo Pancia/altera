@@ -498,11 +498,8 @@ func (d *Daemon) escalateWarning(a *agent.Agent, tickEvents *[]events.Event) {
 		return
 	}
 
-	// Nudge worker by writing a .alt-nudge file to its worktree.
-	if a.Worktree != "" {
-		nudgePath := filepath.Join(a.Worktree, ".alt-nudge")
-		_ = os.WriteFile(nudgePath, []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
-	}
+	// Nudge worker via tmux text injection.
+	d.notifyWorker(a, "The daemon hasn't received a heartbeat from you. Are you still working?")
 
 	*tickEvents = append(*tickEvents, events.Event{
 		Timestamp: time.Now(),
@@ -561,6 +558,20 @@ func (d *Daemon) escalateCritical(a *agent.Agent, tickEvents *[]events.Event) {
 			"staleness_seconds": int(agent.HeartbeatStaleness(a).Seconds()),
 		},
 	})
+}
+
+// notifyWorker sends text to a worker's tmux session as user input.
+func (d *Daemon) notifyWorker(a *agent.Agent, text string) {
+	if a.TmuxSession == "" || !tmux.SessionExists(a.TmuxSession) {
+		return
+	}
+	if err := tmux.SendText(a.TmuxSession, text); err != nil {
+		d.logger.Error("notify: send text", "agent", a.ID, "error", err)
+		return
+	}
+	if err := tmux.SendEnter(a.TmuxSession); err != nil {
+		d.logger.Error("notify: send enter", "agent", a.ID, "error", err)
+	}
 }
 
 // reclaimTask forces a task back to open status, bypassing normal transition
@@ -1079,6 +1090,11 @@ func (d *Daemon) processMergeQueue(tickEvents *[]events.Event) {
 			item.TaskID,
 			map[string]any{"success": true},
 		)
+
+		// Notify worker that merge is complete — it should exit.
+		if a, err := d.agents.Get(item.AgentID); err == nil && a.Status == agent.StatusActive {
+			d.notifyWorker(a, "Your changes have been merged to main. Please exit.")
+		}
 	}
 }
 
@@ -1559,6 +1575,12 @@ func writeWorkerClaudeSettings(worktreePath, agentID, taskID string) error {
 				{
 					Matcher: "",
 					Hooks:   []hookCmd{{Type: "command", Command: fmt.Sprintf("alt heartbeat %s", agentID)}},
+				},
+			},
+			"UserPromptSubmit": {
+				{
+					Matcher: "",
+					Hooks:   []hookCmd{{Type: "command", Command: fmt.Sprintf("alt worker check-messages %s", agentID)}},
 				},
 			},
 			"Stop": {

@@ -13,6 +13,7 @@ import (
 	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/git"
+	"github.com/anthropics/altera/internal/message"
 	"github.com/anthropics/altera/internal/session"
 	"github.com/anthropics/altera/internal/tmux"
 	"github.com/anthropics/altera/internal/worker"
@@ -32,6 +33,7 @@ func init() {
 	workerCmd.AddCommand(workerPeekCmd)
 	workerCmd.AddCommand(workerKillCmd)
 	workerCmd.AddCommand(workerInspectCmd)
+	workerCmd.AddCommand(workerCheckMessagesCmd)
 	workerPeekCmd.Flags().IntVar(&workerPeekLines, "lines", 200, "number of lines to capture")
 	workerPeekCmd.Flags().BoolVar(&workerPeekAll, "all", false, "show full scrollback history")
 	workerPeekCmd.Flags().BoolVar(&workerPeekSession, "session", false, "show JSONL transcript instead of terminal output")
@@ -257,6 +259,79 @@ var workerKillCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Worker %s killed.\n", args[0])
+		return nil
+	},
+}
+
+var workerCheckMessagesCmd = &cobra.Command{
+	Use:   "check-messages [agent-id]",
+	Short: "Check and display pending messages for a worker",
+	Long: `Reads all pending messages for a worker agent, formats them as markdown,
+and prints to stdout. Messages are archived after display so they don't repeat.
+
+The agent ID can be provided as an argument or via the ALT_AGENT_ID environment variable.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		agentID := os.Getenv("ALT_AGENT_ID")
+		if len(args) == 1 {
+			agentID = args[0]
+		}
+		if agentID == "" {
+			return fmt.Errorf("agent ID required: provide as argument or set ALT_AGENT_ID")
+		}
+
+		altDir, err := resolveAltDir()
+		if err != nil {
+			return fmt.Errorf("not an altera project: %w", err)
+		}
+
+		store, err := message.NewStore(filepath.Join(altDir, "messages"))
+		if err != nil {
+			return fmt.Errorf("opening message store: %w", err)
+		}
+
+		msgs, err := store.ListPending(agentID)
+		if err != nil {
+			return fmt.Errorf("listing messages: %w", err)
+		}
+
+		if len(msgs) == 0 {
+			return nil
+		}
+
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("# Pending Messages (%d)\n\n", len(msgs)))
+
+		for _, m := range msgs {
+			b.WriteString(fmt.Sprintf("## %s from %s\n", m.Type, m.From))
+			b.WriteString(fmt.Sprintf("- **ID**: %s\n", m.ID))
+			if m.TaskID != "" {
+				b.WriteString(fmt.Sprintf("- **Task**: %s\n", m.TaskID))
+			}
+			b.WriteString(fmt.Sprintf("- **Time**: %s\n", m.CreatedAt.UTC().Format(time.RFC3339)))
+			if len(m.Payload) > 0 {
+				b.WriteString("- **Payload**:\n")
+				for k, v := range m.Payload {
+					b.WriteString(fmt.Sprintf("  - %s: %v\n", k, v))
+				}
+			}
+
+			// For merge_result with success, append exit instruction.
+			if m.Type == message.TypeMergeResult {
+				if success, ok := m.Payload["success"].(bool); ok && success {
+					b.WriteString("\n**Your changes have been merged to main. Please exit.**\n")
+				}
+			}
+
+			b.WriteString("\n")
+
+			// Archive after display.
+			if err := store.Archive(m.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to archive message %s: %v\n", m.ID, err)
+			}
+		}
+
+		fmt.Print(b.String())
 		return nil
 	},
 }

@@ -373,11 +373,8 @@ func TestCheckAgentLiveness_WarningEscalation(t *testing.T) {
 		t.Errorf("event type = %q, want %q", tickEvents[0].Type, events.AgentWarning)
 	}
 
-	// Nudge file should exist in worktree.
-	nudgePath := filepath.Join(worktreeDir, ".alt-nudge")
-	if _, err := os.Stat(nudgePath); os.IsNotExist(err) {
-		t.Error(".alt-nudge file should be created in worktree")
-	}
+	// Nudge is now sent via tmux (notifyWorker), which is a no-op in tests
+	// because the agent has no live tmux session.
 }
 
 func TestCheckAgentLiveness_WarningNoReEmit(t *testing.T) {
