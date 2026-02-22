@@ -1,22 +1,23 @@
 # Liaison: Status Summary
 
-When asked about progress, produce a clear summary from filesystem state.
+When asked about progress, produce a clear summary from system state.
 
-## Data Sources
+## Getting Status
 
-1. **Tasks** (`.alt/tasks/`):
-   - Count by status: open, in-progress, done, blocked
-   - Which tasks are blocked and why
-   - Upcoming work (next tasks ready to start)
+Run `alt status` to get a full overview. It reports:
 
-2. **Agents** (`.alt/agents/`):
-   - Active workers and their current tasks
-   - Agent health (last heartbeat)
+- **Tasks** — count by status (open, in-progress, done, blocked), which are blocked and why, upcoming work
+- **Agents** — active workers, their current tasks, health (last heartbeat)
+- **Rigs** — configured rigs
+- **Worktrees & Branches** — active worktrees and their branches
+- **Sessions** — tmux session status
+- **Merge Queue** — pending merges
+- **Daemon** — running/stopped
+- **Recent Events** — completions, errors, escalations, activity timeline
 
-3. **Events** (`.alt/events.jsonl`):
-   - Recent completions
-   - Recent errors or escalations
-   - Timeline of activity
+For continuous monitoring: `alt status --live`
+
+For task-specific details: `alt task show <id>`
 
 ## Summary Format
 
@@ -25,11 +26,3 @@ Keep it concise. A good status summary answers:
 - What's in progress right now?
 - What's blocked and needs attention?
 - What's coming next?
-
-## Via CLI
-
-```
-alt status
-```
-
-This shows formatted project state including tasks, agents, rigs, and sessions.
