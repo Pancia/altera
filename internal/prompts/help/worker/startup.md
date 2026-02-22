@@ -15,13 +15,20 @@ When you start as a worker agent:
 4. **Run existing tests** to establish a baseline before making changes
 5. **Plan your approach** — small, incremental changes are better than one big rewrite
 
-## Instructions
+## Full Lifecycle
 
 1. Read task.json in your worktree root for full task details
 2. Implement the required changes
 3. Run the test command to verify your work
 4. Commit your changes with a clear message
-5. Use `alt checkpoint <your-agent-id>` to report progress
+5. Run `alt task-done <task-id> <agent-id>` to signal completion
+
+**WARNING:** Step 5 is mandatory. If you skip it and simply exit, the daemon
+will detect your session ended via heartbeat timeout, mark you as dead, and
+run `reclaimTask` — which resets your task to open and discards your branch.
+Your work will be lost. Always run `alt task-done` before exiting.
+
+Use `alt checkpoint <your-agent-id>` to report progress while still working.
 
 ## Hooks
 

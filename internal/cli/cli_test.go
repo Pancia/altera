@@ -62,6 +62,7 @@ func TestSubcommandRegistration(t *testing.T) {
 		"status", "task", "log", "rig", "work",
 		"daemon", "heartbeat", "checkpoint", "liaison",
 		"worker", "session", "prime", "setup", "help",
+		"task-done",
 	}
 	cmds := rootCmd.Commands()
 	names := make(map[string]bool)
@@ -499,6 +500,75 @@ func TestHelpAgentUnknownTopic(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for unknown topic")
 	}
+}
+
+func TestTaskDoneRequiresArgs(t *testing.T) {
+	setupProject(t)
+	_, err := executeCmd(t, "task-done")
+	if err == nil {
+		t.Error("expected error when no args provided")
+	}
+	_, err = executeCmd(t, "task-done", "t-123")
+	if err == nil {
+		t.Error("expected error when only one arg provided")
+	}
+}
+
+func TestTaskDoneCreatesMessage(t *testing.T) {
+	root := setupProject(t)
+
+	_, err := executeCmd(t, "task-done", "t-abc", "agent-1", "--result", "implemented feature X")
+	if err != nil {
+		t.Fatalf("task-done failed: %v", err)
+	}
+
+	// Verify a message file was created in .alt/messages.
+	msgDir := filepath.Join(root, ".alt", "messages")
+	entries, err := os.ReadDir(msgDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.Contains(e.Name(), "task_done") {
+			data, err := os.ReadFile(filepath.Join(msgDir, e.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var msg map[string]any
+			if err := json.Unmarshal(data, &msg); err != nil {
+				t.Fatal(err)
+			}
+			if msg["from"] != "agent-1" || msg["to"] != "daemon" || msg["task_id"] != "t-abc" {
+				t.Errorf("unexpected message fields: %v", msg)
+			}
+			payload, ok := msg["payload"].(map[string]any)
+			if !ok || payload["result"] != "implemented feature X" {
+				t.Errorf("expected result in payload, got: %v", msg["payload"])
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("no task_done message file found in messages directory")
+	}
+}
+
+func TestTaskDoneResultFlag(t *testing.T) {
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "task-done" {
+			f := c.Flags().Lookup("result")
+			if f == nil {
+				t.Error("task-done missing --result flag")
+			}
+			return
+		}
+	}
+	t.Fatal("task-done command not found")
 }
 
 func TestLogTailFlag(t *testing.T) {
