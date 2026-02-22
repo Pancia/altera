@@ -23,7 +23,9 @@ Multi-agent orchestration system with filesystem-based state (`.alt/` directory)
 ## Build
 
 ```
-make build    # Build binary to bin/alt
+make          # Build and install to ~/.local/bin/alt (default)
+make install  # Same as above
+make build    # Build binary to bin/alt only
 make test     # Run all tests
 make lint     # Run linter
 make clean    # Remove build artifacts
