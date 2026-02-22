@@ -36,6 +36,7 @@ type Agent struct {
 	Status       Status    `json:"status"`
 	CurrentTask  string    `json:"current_task,omitempty"`
 	Worktree     string    `json:"worktree,omitempty"`
+	SessionDir   string    `json:"session_dir,omitempty"`
 	TmuxSession  string    `json:"tmux_session,omitempty"`
 	PID          int       `json:"pid,omitempty"`
 	Heartbeat    time.Time `json:"heartbeat"`

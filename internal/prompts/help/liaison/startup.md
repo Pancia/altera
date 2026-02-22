@@ -33,6 +33,15 @@ Use the `alt` CLI to manage the system:
 - Read messages: `alt message read`
 - Send message: `alt message send <agent-id> <text>`
 
+### Workers
+- List workers: `alt worker list`
+- Peek at output: `alt worker peek <id>` (last 200 lines; `--all` for full history)
+- View transcript: `alt worker peek <id> --session` (JSONL conversation log)
+- Inspect worker: `alt worker inspect <id>` (agent state, git info, tmux status)
+- Send guidance: `alt message send <id> "<advice>"`
+
+For more details: `alt help liaison debugging`
+
 ### Status & Monitoring
 - Full status: `alt status` (tasks, agents, rigs, worktrees, branches, sessions, merge queue, daemon, recent events)
 - Live status: `alt status --live`

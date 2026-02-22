@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/anthropics/altera/internal/agent"
+	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/daemon"
 	"github.com/anthropics/altera/internal/liaison"
 	"github.com/anthropics/altera/internal/tmux"
@@ -93,6 +94,9 @@ var stopCmd = &cobra.Command{
 				fmt.Println("Daemon session killed.")
 			}
 		}
+
+		// Clear debug flag.
+		_ = config.SetDebug(altDir, false)
 
 		fmt.Println("Altera stopped.")
 		return nil

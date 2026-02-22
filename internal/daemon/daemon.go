@@ -27,6 +27,7 @@ import (
 	"github.com/anthropics/altera/internal/merge"
 	"github.com/anthropics/altera/internal/message"
 	"github.com/anthropics/altera/internal/resolver"
+	"github.com/anthropics/altera/internal/session"
 	"github.com/anthropics/altera/internal/task"
 	"github.com/anthropics/altera/internal/tmux"
 )
@@ -422,6 +423,9 @@ func (d *Daemon) markAgentDead(a *agent.Agent, tickEvents *[]events.Event) {
 		}
 	}
 
+	// Copy JSONL transcript to .alt/logs/ before destroying resources.
+	d.copyTranscript(a)
+
 	if a.TmuxSession != "" && tmux.SessionExists(a.TmuxSession) {
 		if err := tmux.KillSession(a.TmuxSession); err != nil {
 			d.logger.Error("liveness: kill tmux session", "session", a.TmuxSession, "error", err)
@@ -722,6 +726,19 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		d.logger.Warn("spawn: could not read pane PID", "session", sessionName, "error", err)
 	}
 
+	// Compute session directory for Claude Code transcripts.
+	sessionDir := session.TranscriptDir(worktreePath)
+
+	// Start terminal logging if debug mode is enabled.
+	if config.DebugEnabled(d.altDir) {
+		logsDir := config.LogsDir(d.altDir)
+		os.MkdirAll(logsDir, 0o755)
+		logPath := filepath.Join(logsDir, agentID+".terminal.log")
+		if err := tmux.StartLogging(sessionName, logPath); err != nil {
+			d.logger.Warn("spawn: failed to start terminal logging", "agent", agentID, "error", err)
+		}
+	}
+
 	// Register the agent.
 	a := &agent.Agent{
 		ID:          agentID,
@@ -729,6 +746,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		Status:      agent.StatusActive,
 		CurrentTask: t.ID,
 		Worktree:    worktreePath,
+		SessionDir:  sessionDir,
 		TmuxSession: sessionName,
 		PID:         panePID,
 		Heartbeat:   time.Now(),
@@ -1268,6 +1286,37 @@ func SendTickNow(altDir string) error {
 		return fmt.Errorf("send SIGUSR1 to daemon (pid %d): %w", st.PID, err)
 	}
 	return nil
+}
+
+// copyTranscript copies the most recent JSONL transcript from Claude Code's
+// project directory to .alt/logs/{agent-id}.jsonl for post-mortem access.
+func (d *Daemon) copyTranscript(a *agent.Agent) {
+	sessionDir := a.SessionDir
+	if sessionDir == "" && a.Worktree != "" {
+		sessionDir = session.TranscriptDir(a.Worktree)
+	}
+	if sessionDir == "" {
+		return
+	}
+
+	transcripts, err := session.FindTranscripts(sessionDir)
+	if err != nil || len(transcripts) == 0 {
+		return
+	}
+
+	logsDir := config.LogsDir(d.altDir)
+	os.MkdirAll(logsDir, 0o755)
+	dst := filepath.Join(logsDir, a.ID+".jsonl")
+
+	src := transcripts[0] // newest transcript
+	data, err := os.ReadFile(src)
+	if err != nil {
+		d.logger.Warn("copy transcript: read", "agent", a.ID, "error", err)
+		return
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		d.logger.Warn("copy transcript: write", "agent", a.ID, "error", err)
+	}
 }
 
 // --- Helpers ---

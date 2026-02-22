@@ -10,11 +10,19 @@ import (
 	"time"
 
 	"github.com/anthropics/altera/internal/agent"
+	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/git"
+	"github.com/anthropics/altera/internal/session"
 	"github.com/anthropics/altera/internal/tmux"
 	"github.com/anthropics/altera/internal/worker"
 	"github.com/spf13/cobra"
+)
+
+var (
+	workerPeekLines   int
+	workerPeekAll     bool
+	workerPeekSession bool
 )
 
 func init() {
@@ -24,10 +32,10 @@ func init() {
 	workerCmd.AddCommand(workerPeekCmd)
 	workerCmd.AddCommand(workerKillCmd)
 	workerCmd.AddCommand(workerInspectCmd)
-	workerPeekCmd.Flags().IntVar(&workerPeekLines, "lines", 50, "number of lines to capture")
+	workerPeekCmd.Flags().IntVar(&workerPeekLines, "lines", 200, "number of lines to capture")
+	workerPeekCmd.Flags().BoolVar(&workerPeekAll, "all", false, "show full scrollback history")
+	workerPeekCmd.Flags().BoolVar(&workerPeekSession, "session", false, "show JSONL transcript instead of terminal output")
 }
-
-var workerPeekLines int
 
 var workerCmd = &cobra.Command{
 	Use:   "worker",
@@ -107,8 +115,17 @@ var workerAttachCmd = &cobra.Command{
 
 var workerPeekCmd = &cobra.Command{
 	Use:   "peek <id>",
-	Short: "Capture recent output from a worker's tmux pane",
-	Args:  cobra.ExactArgs(1),
+	Short: "Capture recent output from a worker",
+	Long: `Capture terminal output from a worker agent.
+
+For live sessions, captures from the tmux pane scrollback.
+For dead sessions, falls back to reading the terminal log file from .alt/logs/.
+
+Flags:
+  --lines N    Number of lines to capture (default 200)
+  --all        Show full scrollback history
+  --session    Show the JSONL transcript instead of terminal output`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		altDir, err := resolveAltDir()
 		if err != nil {
@@ -124,17 +141,92 @@ var workerPeekCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("agent %q: %w", args[0], err)
 		}
-		if a.TmuxSession == "" {
-			return fmt.Errorf("agent %q has no tmux session", args[0])
+
+		// --session: show JSONL transcript instead of terminal output.
+		if workerPeekSession {
+			return peekSession(altDir, a)
 		}
 
-		output, err := tmux.CapturePane(a.TmuxSession, workerPeekLines)
+		// Check if tmux session is alive.
+		sessionAlive := a.TmuxSession != "" && tmux.SessionExists(a.TmuxSession)
+
+		if sessionAlive {
+			lines := workerPeekLines
+			if workerPeekAll {
+				lines = -1 // full history
+			}
+			output, err := tmux.CapturePane(a.TmuxSession, lines)
+			if err != nil {
+				return fmt.Errorf("capturing pane: %w", err)
+			}
+			fmt.Print(output)
+			return nil
+		}
+
+		// Session is dead — fall back to terminal log file.
+		logPath := filepath.Join(config.LogsDir(altDir), a.ID+".terminal.log")
+		data, err := os.ReadFile(logPath)
 		if err != nil {
-			return fmt.Errorf("capturing pane: %w", err)
+			if os.IsNotExist(err) {
+				return fmt.Errorf("no live session and no terminal log found for %s", a.ID)
+			}
+			return fmt.Errorf("reading terminal log: %w", err)
+		}
+
+		output := string(data)
+		if !workerPeekAll && workerPeekLines > 0 {
+			output = lastNLines(output, workerPeekLines)
 		}
 		fmt.Print(output)
 		return nil
 	},
+}
+
+// peekSession finds and renders the JSONL transcript for an agent.
+func peekSession(altDir string, a *agent.Agent) error {
+	// Try the agent's session directory first.
+	if a.SessionDir != "" {
+		transcripts, err := session.FindTranscripts(a.SessionDir)
+		if err == nil && len(transcripts) > 0 {
+			return renderTranscript(transcripts[0])
+		}
+	}
+
+	// Fall back to .alt/logs/{id}.jsonl (copied on cleanup).
+	logPath := filepath.Join(config.LogsDir(altDir), a.ID+".jsonl")
+	if _, err := os.Stat(logPath); err == nil {
+		return renderTranscript(logPath)
+	}
+
+	// Try computing session dir from worktree path.
+	if a.Worktree != "" {
+		dir := session.TranscriptDir(a.Worktree)
+		transcripts, err := session.FindTranscripts(dir)
+		if err == nil && len(transcripts) > 0 {
+			return renderTranscript(transcripts[0])
+		}
+	}
+
+	return fmt.Errorf("no JSONL transcript found for %s", a.ID)
+}
+
+// renderTranscript renders a JSONL file to stdout.
+func renderTranscript(path string) error {
+	output, err := session.RenderTranscript(path)
+	if err != nil {
+		return fmt.Errorf("rendering transcript: %w", err)
+	}
+	fmt.Print(output)
+	return nil
+}
+
+// lastNLines returns the last n lines of a string.
+func lastNLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }
 
 var workerKillCmd = &cobra.Command{

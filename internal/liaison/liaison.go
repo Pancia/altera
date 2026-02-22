@@ -17,6 +17,7 @@ import (
 	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/message"
+	"github.com/anthropics/altera/internal/session"
 	"github.com/anthropics/altera/internal/task"
 	"github.com/anthropics/altera/internal/tmux"
 )
@@ -68,6 +69,15 @@ func (m *Manager) StartLiaison() error {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
+	// Start terminal logging if debug mode is enabled.
+	altDir := filepath.Join(m.projectRoot, config.DirName)
+	if config.DebugEnabled(altDir) {
+		logsDir := config.LogsDir(altDir)
+		os.MkdirAll(logsDir, 0o755)
+		logPath := filepath.Join(logsDir, AgentID+".terminal.log")
+		_ = tmux.StartLogging(SessionName, logPath)
+	}
+
 	// Start Claude Code in the session.
 	claudeCmd := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", m.projectRoot)
 	if err := tmux.SendKeys(SessionName, claudeCmd); err != nil {
@@ -75,12 +85,16 @@ func (m *Manager) StartLiaison() error {
 		return fmt.Errorf("starting claude code: %w", err)
 	}
 
+	// Compute session directory for Claude Code transcripts.
+	sessionDir := session.TranscriptDir(m.projectRoot)
+
 	// Register agent.
 	now := time.Now()
 	a := &agent.Agent{
 		ID:          AgentID,
 		Role:        agent.RoleLiaison,
 		Status:      agent.StatusActive,
+		SessionDir:  sessionDir,
 		TmuxSession: SessionName,
 		Heartbeat:   now,
 		StartedAt:   now,

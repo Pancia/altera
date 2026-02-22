@@ -2,7 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/anthropics/altera/internal/config"
 	"github.com/anthropics/altera/internal/daemon"
 	"github.com/anthropics/altera/internal/liaison"
 	"github.com/anthropics/altera/internal/tmux"
@@ -11,8 +14,11 @@ import (
 
 const daemonSessionName = "alt-daemon"
 
+var startDebug bool
+
 func init() {
 	rootCmd.AddCommand(startCmd)
+	startCmd.Flags().BoolVar(&startDebug, "debug", false, "enable terminal logging (pipe-pane) for all sessions")
 }
 
 var startCmd = &cobra.Command{
@@ -28,6 +34,16 @@ var startCmd = &cobra.Command{
 		root, err := projectRoot()
 		if err != nil {
 			return err
+		}
+
+		// Persist debug flag so spawned agents inherit it.
+		if startDebug {
+			if err := config.SetDebug(altDir, true); err != nil {
+				return fmt.Errorf("setting debug flag: %w", err)
+			}
+			// Ensure logs directory exists.
+			os.MkdirAll(filepath.Join(altDir, "logs"), 0o755)
+			fmt.Println("Debug mode enabled (terminal logging active).")
 		}
 
 		// Start daemon if not already running.

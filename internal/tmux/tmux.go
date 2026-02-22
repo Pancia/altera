@@ -39,6 +39,22 @@ func CreateSession(name string) error {
 	mouseArgs := append(socketArgs(), "set-option", "-t", name, "mouse", "on")
 	mouseCmd := exec.Command("tmux", mouseArgs...)
 	_ = mouseCmd.Run()
+	// Increase scrollback history for better peek/capture.
+	histArgs := append(socketArgs(), "set-option", "-t", name, "history-limit", "50000")
+	histCmd := exec.Command("tmux", histArgs...)
+	_ = histCmd.Run()
+	return nil
+}
+
+// StartLogging enables continuous terminal output logging for a tmux session
+// using pipe-pane. Output is appended to logPath.
+func StartLogging(session, logPath string) error {
+	args := append(socketArgs(), "pipe-pane", "-t", session, "-o",
+		fmt.Sprintf("cat >> %s", logPath))
+	cmd := exec.Command("tmux", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux pipe-pane %q: %s: %w", session, strings.TrimSpace(string(out)), err)
+	}
 	return nil
 }
 
@@ -127,9 +143,12 @@ func SendEnter(session string) error {
 
 // CapturePane captures the last n lines of output from the session's pane.
 // If lines is 0, tmux captures the visible pane content.
+// If lines is -1, captures the full scrollback history (-S -).
 func CapturePane(session string, lines int) (string, error) {
 	args := append(socketArgs(), "capture-pane", "-t", session, "-p")
-	if lines > 0 {
+	if lines == -1 {
+		args = append(args, "-S", "-")
+	} else if lines > 0 {
 		start := fmt.Sprintf("-%d", lines)
 		args = append(args, "-S", start)
 	}
@@ -138,7 +157,12 @@ func CapturePane(session string, lines int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("tmux capture-pane %q: %s: %w", session, strings.TrimSpace(string(out)), err)
 	}
-	return string(out), nil
+	// Strip trailing blank lines.
+	result := strings.TrimRight(string(out), "\n")
+	if result != "" {
+		result += "\n"
+	}
+	return result, nil
 }
 
 // ListSessions returns the names of all Altera-managed tmux sessions

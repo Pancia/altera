@@ -96,6 +96,7 @@ func EnsureDir(parentDir string) (string, error) {
 		filepath.Join(altDir, "merge-queue"),
 		filepath.Join(altDir, "rigs"),
 		filepath.Join(altDir, "worktrees"),
+		filepath.Join(altDir, "logs"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -103,6 +104,30 @@ func EnsureDir(parentDir string) (string, error) {
 		}
 	}
 	return altDir, nil
+}
+
+// LogsDir returns the path to the logs directory within the given .alt/ dir.
+func LogsDir(altDir string) string {
+	return filepath.Join(altDir, "logs")
+}
+
+// DebugEnabled returns true if the debug marker file exists in the .alt/ dir.
+func DebugEnabled(altDir string) bool {
+	_, err := os.Stat(filepath.Join(altDir, "debug"))
+	return err == nil
+}
+
+// SetDebug creates or removes the debug marker file.
+func SetDebug(altDir string, enabled bool) error {
+	path := filepath.Join(altDir, "debug")
+	if enabled {
+		return os.WriteFile(path, []byte("1\n"), 0o644)
+	}
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // Load reads and parses the root config.json from the given .alt/ directory.

@@ -20,6 +20,7 @@ import (
 	"github.com/anthropics/altera/internal/events"
 	"github.com/anthropics/altera/internal/git"
 	"github.com/anthropics/altera/internal/merge"
+	"github.com/anthropics/altera/internal/session"
 	"github.com/anthropics/altera/internal/tmux"
 )
 
@@ -187,6 +188,17 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 		return nil, fmt.Errorf("starting claude code: %w", err)
 	}
 
+	// Compute session directory for Claude Code transcripts.
+	sessionDir := session.TranscriptDir(worktreePath)
+
+	// Start terminal logging if debug mode is enabled.
+	if config.DebugEnabled(altDir) {
+		logsDir := config.LogsDir(altDir)
+		os.MkdirAll(logsDir, 0o755)
+		logPath := filepath.Join(logsDir, id+".terminal.log")
+		_ = tmux.StartLogging(sessionName, logPath)
+	}
+
 	// 6. Create agent record.
 	now := time.Now()
 	a := &agent.Agent{
@@ -196,6 +208,7 @@ func (m *Manager) SpawnResolver(ctx ConflictContext) (*agent.Agent, error) {
 		Status:      agent.StatusActive,
 		CurrentTask: ctx.TaskID,
 		Worktree:    worktreePath,
+		SessionDir:  sessionDir,
 		TmuxSession: sessionName,
 		Heartbeat:   now,
 		StartedAt:   now,
@@ -263,13 +276,17 @@ func hasConflictMarkers(path string) bool {
 }
 
 // CleanupResolver tears down a resolver agent:
-//  1. Kill tmux session
-//  2. Delete git worktree
-//  3. Archive agent record (set status=dead)
+//  1. Copy JSONL transcript to .alt/logs/
+//  2. Kill tmux session
+//  3. Delete git worktree
+//  4. Archive agent record (set status=dead)
 func (m *Manager) CleanupResolver(a *agent.Agent) error {
 	var errs []string
 
-	// 1. Kill tmux session.
+	// 1. Copy JSONL transcript before destroying resources.
+	m.copyTranscript(a)
+
+	// 2. Kill tmux session.
 	if a.TmuxSession != "" {
 		if err := tmux.KillSession(a.TmuxSession); err != nil {
 			errs = append(errs, fmt.Sprintf("kill tmux session: %v", err))
@@ -324,6 +341,30 @@ func (m *Manager) ListResolvers() ([]*agent.Agent, error) {
 		return resolvers[i].ID < resolvers[j].ID
 	})
 	return resolvers, nil
+}
+
+// copyTranscript copies the most recent JSONL transcript to .alt/logs/.
+func (m *Manager) copyTranscript(a *agent.Agent) {
+	sessionDir := a.SessionDir
+	if sessionDir == "" && a.Worktree != "" {
+		sessionDir = session.TranscriptDir(a.Worktree)
+	}
+	if sessionDir == "" {
+		return
+	}
+	transcripts, err := session.FindTranscripts(sessionDir)
+	if err != nil || len(transcripts) == 0 {
+		return
+	}
+	altDir := filepath.Join(m.projectRoot, config.DirName)
+	logsDir := config.LogsDir(altDir)
+	os.MkdirAll(logsDir, 0o755)
+	dst := filepath.Join(logsDir, a.ID+".jsonl")
+	data, err := os.ReadFile(transcripts[0])
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(dst, data, 0o644)
 }
 
 // writeConflictContext writes the conflict context as JSON to

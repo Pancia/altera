@@ -39,7 +39,7 @@ func TestTopics_Liaison(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Topics(liaison) failed: %v", err)
 	}
-	expected := []string{"escalation", "startup", "status", "task-create"}
+	expected := []string{"debugging", "escalation", "startup", "status", "task-create"}
 	if len(topics) != len(expected) {
 		t.Fatalf("expected %d liaison topics, got %d: %v", len(expected), len(topics), topics)
 	}
