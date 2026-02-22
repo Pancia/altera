@@ -747,7 +747,7 @@ func (d *Daemon) spawnWorker(t *task.Task) (string, error) {
 		"Read task.json, then run alt help worker startup for full instructions. When finished, run: alt task-done %s %s",
 		t.ID, agentID,
 	)
-	claudeCmd := fmt.Sprintf("cd %s && env -u CLAUDECODE ALT_AGENT_ID=%s exec claude --dangerously-skip-permissions %q", worktreePath, agentID, initialPrompt)
+	claudeCmd := fmt.Sprintf("cd %s && unset CLAUDECODE && export ALT_AGENT_ID=%s && exec claude --dangerously-skip-permissions %q", worktreePath, agentID, initialPrompt)
 	if err := tmux.SendKeys(sessionName, claudeCmd); err != nil {
 		_ = tmux.KillSession(sessionName)
 		cleanupGit()
