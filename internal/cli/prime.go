@@ -14,7 +14,6 @@ import (
 	"github.com/anthropics/altera/internal/liaison"
 	"github.com/anthropics/altera/internal/message"
 	"github.com/anthropics/altera/internal/task"
-	"github.com/anthropics/altera/internal/worker"
 	"github.com/spf13/cobra"
 )
 
@@ -108,10 +107,14 @@ func detectRole(root, altDir string) (string, string) {
 	return "liaison", "liaison-01"
 }
 
-// primeLiaison outputs the liaison system prompt + runtime state.
+// primeLiaison outputs a slim role header + runtime state.
 func primeLiaison(root, altDir string) error {
-	// Output the static prompt template.
-	fmt.Print(liaison.LiaisonPrompt())
+	fmt.Println("# Liaison Agent")
+	fmt.Println()
+	fmt.Println("You are the liaison agent in the Altera multi-agent orchestration system.")
+	fmt.Println("You translate between human intent and the task/agent system.")
+	fmt.Println()
+	fmt.Println("Use `alt help liaison startup` for instructions. Use `alt <command> --help` for syntax.")
 	fmt.Println()
 
 	// Output runtime state using the liaison manager's Prime() logic.
@@ -162,12 +165,19 @@ func primeWorker(root, altDir, agentID string) error {
 		}
 	}
 
-	// Output the static worker prompt.
+	// Output slim role header.
+	fmt.Printf("# Worker Agent: %s\n\n", agentID)
 	if t != nil {
-		fmt.Print(worker.WorkerPrompt(t, agentID, a.Rig))
+		fmt.Printf("- **Task**: %s `%s`\n", t.Title, t.ID)
 	} else {
-		fmt.Printf("# Worker Agent: %s\n\nNo task currently assigned.\n\n", agentID)
+		fmt.Println("No task currently assigned.")
 	}
+	if a.Rig != "" {
+		fmt.Printf("- **Rig**: %s\n", a.Rig)
+	}
+	fmt.Println()
+	fmt.Println("Use `alt help worker startup` for instructions. Use `alt <command> --help` for syntax.")
+	fmt.Println()
 
 	// Output task.json contents if available in the worktree.
 	if a.Worktree != "" {
